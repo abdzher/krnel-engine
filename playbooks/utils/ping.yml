@@ -1,0 +1,15 @@
+---
+# =============================================================================
+# KRNEL — playbooks/utils/ping.yml
+# Verifica conectividad básica con los nodos.
+#
+# Uso: 
+#   ansible-playbook -i inventories/mrkov playbooks/utils/ping.yml
+# =============================================================================
+
+- name: "UTILIDAD | Verificar conectividad de los nodos"
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: Realizar ping
+      ansible.builtin.ping:

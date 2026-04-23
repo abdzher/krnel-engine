@@ -1,0 +1,21 @@
+---
+# =============================================================================
+# KRNEL — playbooks/utils/shutdown.yml
+# Apaga los nodos del clúster. Útil para mantenimientos de hardware o
+# ahorro de energía.
+#
+# Uso para todo el clúster:
+#   ansible-playbook -i inventories/mrkov playbooks/utils/shutdown.yml -K
+#
+# Uso para un grupo específico (ej. workers):
+#   ansible-playbook -i inventories/mrkov playbooks/utils/shutdown.yml -l workers -K
+# =============================================================================
+
+- name: "UTILIDAD | Apagar nodos"
+  hosts: all
+  become: true
+  tasks:
+    - name: Apagar la máquina de inmediato
+      community.general.shutdown:
+        delay: 0
+        msg: "Apagado del sistema solicitado remotamente por Ansible (KRNEL Engine)"

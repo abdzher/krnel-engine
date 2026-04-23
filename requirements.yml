@@ -1,19 +1,23 @@
 ---
 # =============================================================================
 # KRNEL — requirements.yml
-# Para ejecutar primero crear tu entorno con uv
-# uv venv --python 3.12
-# Posteriormente instala ansible
-# uv tool install ansible-core --with ansible
-# Finalmente ejecuta este comando para añadirlos al PATH
-# uv tool update-shell
-# Instalar con: ansible-galaxy install -r requirements.yml
-#               ansible-galaxy collection install -r requirements.yml
+# Para ejecutar primero crear tu entorno con uv:
+#   uv venv --python 3.12
+# Luego activa tu entorno virtual:
+#   source .venv/bin/activate
+# Posteriormente instala ansible y colecciones adicionales:
+#   uv tool install ansible-core --with ansible
+#   uv pip install netaddr
+# Ejecuta el siguiente comando para añadirlos al PATH:
+#   uv tool update-shell
+# Finalmente, instala los roles y colecciones con: 
+#  ansible-galaxy install -r requirements.yml
+#  ansible-galaxy collection install -r requirements.yml
 # =============================================================================
 
-#roles:
-#  - name: PyratLabs.k3s
-#    version: "3.3.1"
+roles:
+  - name: PyratLabs.k3s
+    version: "3.3.1"
 
 collections:
   - name: community.general

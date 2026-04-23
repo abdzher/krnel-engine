@@ -1,0 +1,23 @@
+---
+# =============================================================================
+# KRNEL — playbooks/utils/reboot.yml
+# Reinicia los nodos del clúster de forma segura y espera a que vuelvan a estar
+# en línea.
+#
+# Uso para todo el clúster:
+#   ansible-playbook -i inventories/mrkov playbooks/utils/reboot.yml -K
+#
+# Uso para un solo nodo (ej. nd-2):
+#   ansible-playbook -i inventories/mrkov playbooks/utils/reboot.yml -l nd-2 -K
+# =============================================================================
+
+- name: "UTILIDAD | Reiniciar nodos"
+  hosts: all
+  become: true
+  tasks:
+    - name: Reiniciar el sistema y esperar
+      ansible.builtin.reboot:
+        msg: "Reinicio solicitado remotamente por Ansible (KRNEL Engine)"
+        pre_reboot_delay: 5
+        post_reboot_delay: 30
+        reboot_timeout: 600
