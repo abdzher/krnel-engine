@@ -17,7 +17,7 @@
 
 roles:
   - name: xanmanning.k3s
-    version: "3.6.2"
+    version: "v3.6.2"
 
 collections:
   - name: community.general

@@ -3,6 +3,9 @@
 # Ansible Collections
 collections/
 
+# Ansible roles
+roles/
+
 # Ignorar configuración sensible (vars de ansible, IPs, etc)
 inventories/mrkov/group_vars/all.yml
 inventories/mrkov/hosts.ini
