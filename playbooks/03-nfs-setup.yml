@@ -1,0 +1,117 @@
+---
+# =============================================================================
+# KRNEL — playbooks/03-nfs-setup.yml
+# Tarea 5: Instalación y configuración del servidor NFS en nd-1 y
+#          del cliente NFS en los workers.
+# Tarea 6: Instalación del NFS Subdir External Provisioner (StorageClass dinámica).
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# TAREA 5 — Servidor NFS en nd-1
+# -----------------------------------------------------------------------------
+- name: "TAREA 5 | Configurar servidor NFS en nd-1"
+  hosts: master
+  become: true
+  handlers:
+    - name: Reexportar shares NFS
+      ansible.builtin.command: exportfs -ra
+      changed_when: true
+
+    - name: Reiniciar nfs-kernel-server
+      ansible.builtin.systemd:
+        name: nfs-kernel-server
+        state: restarted
+        enabled: true
+
+  tasks:
+    - name: Instalar paquete nfs-kernel-server
+      ansible.builtin.apt:
+        name: nfs-kernel-server
+        state: present
+        update_cache: true
+
+    - name: Crear directorios de shares NFS con permisos correctos
+      ansible.builtin.file:
+        path: "{{ nfs_base_path }}/{{ item }}"
+        state: directory
+        owner: nobody
+        group: nogroup
+        mode: "0777"
+      loop: "{{ nfs_shares }}"
+
+    - name: Configurar /etc/exports (idempotente via blockinfile)
+      ansible.builtin.blockinfile:
+        path: /etc/exports
+        marker: "# {mark} KRNEL MRKOV NFS EXPORTS"
+        create: true
+        block: |
+          {% for share in nfs_shares %}
+          {{ nfs_base_path }}/{{ share }} {{ network_segment }}(rw,sync,no_subtree_check,no_root_squash)
+          {% endfor %}
+      notify:
+        - Reexportar shares NFS
+        - Reiniciar nfs-kernel-server
+
+    - name: Asegurar que nfs-kernel-server está habilitado y activo
+      ansible.builtin.systemd:
+        name: nfs-kernel-server
+        state: started
+        enabled: true
+
+# -----------------------------------------------------------------------------
+# TAREA 5 — Cliente NFS en workers
+# -----------------------------------------------------------------------------
+- name: "TAREA 5 | Instalar cliente NFS en los workers"
+  hosts: workers
+  become: true
+  tasks:
+    - name: Instalar paquete nfs-common
+      ansible.builtin.apt:
+        name: nfs-common
+        state: present
+        update_cache: true
+
+# -----------------------------------------------------------------------------
+# TAREA 6 — NFS Subdir External Provisioner
+# Crea la StorageClass dinámica 'nfs-master' para los PVCs de JupyterHub.
+# -----------------------------------------------------------------------------
+- name: "TAREA 6 | Instalar NFS Subdir External Provisioner"
+  hosts: master
+  become: false
+  tasks:
+    - name: Agregar repositorio Helm del NFS Subdir Provisioner
+      kubernetes.core.helm_repository:
+        kubeconfig: "{{ k8s_kubeconfig }}"
+        name: nfs-subdir-external-provisioner
+        repo_url: "https://kubernetes-sigs.github.io/nfs-subdir-external-provisioner/"
+        state: present
+
+    - name: Instalar/Actualizar NFS Subdir External Provisioner (upgrade --install)
+      kubernetes.core.helm:
+        kubeconfig: "{{ k8s_kubeconfig }}"
+        name: nfs-provisioner
+        chart_ref: nfs-subdir-external-provisioner/nfs-subdir-external-provisioner
+        release_namespace: default
+        update_repo_cache: true
+        values:
+          nfs:
+            server: "{{ nd1_ip }}"
+            path: "{{ nfs_base_path }}/jupyter-data"
+          storageClass:
+            name: "{{ storage_class_name }}"
+            defaultClass: false
+        state: present   # kubernetes.core.helm usa upgrade --install internamente
+
+    - name: Verificar que la StorageClass fue creada
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ k8s_kubeconfig }}"
+        kind: StorageClass
+        name: "{{ storage_class_name }}"
+      register: sc_info
+      retries: 6
+      delay: 10
+      until: sc_info.resources | length > 0
+
+    - name: Confirmar StorageClass disponible
+      ansible.builtin.debug:
+        msg: "StorageClass '{{ storage_class_name }}' creada y disponible."

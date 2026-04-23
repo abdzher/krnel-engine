@@ -1,0 +1,24 @@
+---
+# =============================================================================
+# KRNEL — requirements.yml
+# Para ejecutar primero crear tu entorno con uv
+# uv venv --python 3.12
+# Posteriormente instala ansible
+# uv tool install ansible-core --with ansible
+# Finalmente ejecuta este comando para añadirlos al PATH
+# uv tool update-shell
+# Instalar con: ansible-galaxy install -r requirements.yml
+#               ansible-galaxy collection install -r requirements.yml
+# =============================================================================
+
+#roles:
+#  - name: PyratLabs.k3s
+#    version: "3.3.1"
+
+collections:
+  - name: community.general
+    version: ">=9.0.0"
+  - name: kubernetes.core
+    version: ">=5.0.0"
+  - name: ansible.posix
+    version: ">=1.5.0"

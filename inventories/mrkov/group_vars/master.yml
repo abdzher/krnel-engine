@@ -1,0 +1,18 @@
+---
+# =============================================================================
+# KRNEL — group_vars/master.yml
+# Variables específicas del nodo master (nd-1): Control Plane k3s + servidor NFS.
+# =============================================================================
+
+# --- PyrateLabs.k3s role ---
+# Documentación: https://github.com/PyrateLabs/ansible-role-k3s
+k3s_control_node: true
+k3s_server:
+  node-ip:              "{{ ansible_host }}"
+  flannel-iface:        "{{ node_iface }}"
+  cluster-cidr:         "{{ k3s_cluster_cidr }}"
+  service-cidr:         "{{ k3s_service_cidr }}"
+  write-kubeconfig-mode: "644"
+
+# Este nodo actúa también como servidor NFS
+is_nfs_server: true

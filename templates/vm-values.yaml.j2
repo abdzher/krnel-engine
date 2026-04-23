@@ -1,0 +1,35 @@
+# ==============================================================================
+# KRNEL — templates/vm-values.yaml.j2
+# Valores para el chart vm/victoria-metrics-k8s-stack
+# Renderizado por Ansible — NO editar directamente en el servidor
+# ==============================================================================
+
+# VictoriaMetrics Single — motor de base de datos de series temporales
+vmsingle:
+  enabled: true
+  spec:
+    retentionPeriod: "{{ victoria_metrics_retention }}"  # meses de retención
+    storage:
+      storageClassName: {{ storage_class_name }}
+      accessModes: ["ReadWriteOnce"]
+      resources:
+        requests:
+          storage: {{ victoria_metrics_storage }}
+
+# Grafana — visualización de métricas
+grafana:
+  enabled: true
+  persistence:
+    enabled: true
+    storageClassName: {{ storage_class_name }}   # CORREGIDO: era 'nfs-client', debe ser '{{ storage_class_name }}'
+  service:
+    type: NodePort
+    nodePort: {{ victoria_metrics_port }}
+
+# VMAgent — recolector de métricas del clúster
+vmagent:
+  enabled: true
+
+# AlertManager — desactivado (no requerido en esta fase)
+alertmanager:
+  enabled: false

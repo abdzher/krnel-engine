@@ -1,0 +1,16 @@
+# =============================================================================
+# KRNEL — inventories/mrkov/hosts.ini
+# Inventario del clúster MRKOV
+# =============================================================================
+
+[master]
+nd-1 ansible_host=X.X.X.1 ansible_user=ansible node_iface=enp1s0
+
+[workers]
+nd-2 ansible_host=X.X.X.2 ansible_user=ansible node_iface=enp1s0
+nd-3 ansible_host=X.X.X.3 ansible_user=ansible node_iface=enp1s0
+nd-4 ansible_host=X.X.X.4 ansible_user=ansible node_iface=enp1s0
+
+[k3s_cluster:children]
+master
+workers

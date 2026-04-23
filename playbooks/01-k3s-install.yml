@@ -1,0 +1,66 @@
+---
+# =============================================================================
+# KRNEL — playbooks/01-k3s-install.yml
+# Tarea 2: Instalación de k3s sobre todos los nodos usando el rol
+# PyrateLabs.k3s (idempotente, con versión fija, gestión automática de tokens).
+#
+# El rol lee k3s_control_node desde group_vars/master.yml y workers.yml
+# para diferenciar entre Control Plane y Agents automáticamente.
+#
+# Documentación del rol: https://github.com/PyrateLabs/ansible-role-k3s
+# =============================================================================
+
+- name: "TAREA 2 | Instalar k3s en todos los nodos del clúster"
+  hosts: k3s_cluster
+  become: true
+  roles:
+    - role: PyratLabs.k3s
+      vars:
+        k3s_become:          true
+        k3s_release_version: "{{ k3s_version }}"
+
+# -----------------------------------------------------------------------------
+# Configurar kubeconfig en el nodo master para el usuario ansible
+# -----------------------------------------------------------------------------
+- name: "TAREA 2 | Configurar kubeconfig en el nodo master"
+  hosts: master
+  become: true
+  tasks:
+    - name: Crear directorio ~/.kube para el usuario ansible
+      ansible.builtin.file:
+        path: "/home/ansible/.kube"
+        state: directory
+        owner: ansible
+        group: ansible
+        mode: "0750"
+
+    - name: Copiar kubeconfig al home del usuario ansible
+      ansible.builtin.copy:
+        src: /etc/rancher/k3s/k3s.yaml
+        dest: "/home/ansible/.kube/config"
+        owner: ansible
+        group: ansible
+        mode: "0600"
+        remote_src: true
+
+    - name: Asegurar KUBECONFIG en .bashrc (idempotente vía lineinfile)
+      ansible.builtin.lineinfile:
+        path: /home/ansible/.bashrc
+        line: 'export KUBECONFIG=~/.kube/config'
+        regexp: '^export KUBECONFIG='
+        state: present
+
+    - name: Verificar que todos los nodos están en estado Ready
+      ansible.builtin.command: kubectl get nodes --no-headers
+      environment:
+        KUBECONFIG: "/home/ansible/.kube/config"
+      register: kubectl_nodes
+      changed_when: false
+      become: false
+      retries: 12
+      delay: 10
+      until: kubectl_nodes.rc == 0
+
+    - name: Mostrar estado de los nodos del clúster
+      ansible.builtin.debug:
+        msg: "{{ kubectl_nodes.stdout_lines }}"

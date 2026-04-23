@@ -1,0 +1,140 @@
+---
+# =============================================================================
+# KRNEL — playbooks/00-system-prep.yml
+# Tareas 0, 1 y 1.5: Verificación de conectividad, actualizaciones del
+# sistema, configuración de /etc/hosts, firewall UFW y desactivación de swap.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# TAREA 0 — Verificar conectividad
+# -----------------------------------------------------------------------------
+- name: "TAREA 0 | Verificar conectividad con todos los nodos"
+  hosts: k3s_cluster
+  gather_facts: false
+  tasks:
+    - name: Ping a todos los nodos del clúster
+      ansible.builtin.ping:
+
+# -----------------------------------------------------------------------------
+# TAREA 0 — Actualizar paquetes
+# NOTA: perform_apt_upgrade está desactivado por defecto (all.yml).
+#       Activar solo en ventanas de mantenimiento:
+#       ansible-playbook ... -e perform_apt_upgrade=true
+# -----------------------------------------------------------------------------
+- name: "TAREA 0 | Gestión de paquetes del sistema"
+  hosts: k3s_cluster
+  become: true
+  tasks:
+    - name: Actualizar caché de apt
+      ansible.builtin.apt:
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Aplicar actualizaciones (solo si perform_apt_upgrade=true)
+      ansible.builtin.apt:
+        upgrade: dist
+        update_cache: false
+      when: perform_apt_upgrade | default(false) | bool
+
+# -----------------------------------------------------------------------------
+# TAREA 1 — /etc/hosts y UFW
+# -----------------------------------------------------------------------------
+- name: "TAREA 1 | Configurar /etc/hosts y firewall UFW"
+  hosts: k3s_cluster
+  become: true
+  tasks:
+    - name: "HOSTS | Añadir entradas del clúster a /etc/hosts (idempotente)"
+      ansible.builtin.blockinfile:
+        path: /etc/hosts
+        marker: "# {mark} KRNEL MRKOV CLUSTER NODES"
+        block: |
+          {% for node in cluster_nodes %}
+          {% if node.ip != ansible_host %}
+          {{ node.ip }} {{ node.name }}
+          {% endif %}
+          {% endfor %}
+
+    - name: "UFW | Política por defecto — denegar entrante"
+      community.general.ufw:
+        default: deny
+        direction: incoming
+
+    - name: "UFW | Política por defecto — permitir saliente"
+      community.general.ufw:
+        default: allow
+        direction: outgoing
+
+    - name: "UFW | Permitir SSH"
+      community.general.ufw:
+        rule: allow
+        name: OpenSSH
+
+    - name: "UFW | Permitir todo el tráfico desde los demás nodos del clúster"
+      community.general.ufw:
+        rule: allow
+        src: "{{ item.ip }}"
+      loop: "{{ cluster_nodes }}"
+      when: item.ip != ansible_host
+
+    - name: "UFW | Permitir HTTP (80/tcp) y HTTPS (443/tcp)"
+      community.general.ufw:
+        rule: allow
+        port: "{{ item.port }}"
+        proto: "{{ item.proto }}"
+      loop:
+        - { port: "80",  proto: "tcp" }
+        - { port: "443", proto: "tcp" }
+
+    - name: "UFW | Permitir red de Pods k3s (cluster-cidr)"
+      community.general.ufw:
+        rule: allow
+        src: "{{ k3s_cluster_cidr }}"
+
+    - name: "UFW | Permitir red de Services k3s (service-cidr)"
+      community.general.ufw:
+        rule: allow
+        src: "{{ k3s_service_cidr }}"
+
+    # --- Puertos requeridos por k3s ---
+    - name: "UFW | Permitir API Server k3s (6443/tcp)"
+      community.general.ufw:
+        rule: allow
+        port: "6443"
+        proto: tcp
+        src: "{{ network_segment }}"
+
+    - name: "UFW | Permitir Flannel VXLAN (8472/udp)"
+      community.general.ufw:
+        rule: allow
+        port: "8472"
+        proto: udp
+        src: "{{ network_segment }}"
+
+    - name: "UFW | Permitir kubelet API (10250/tcp)"
+      community.general.ufw:
+        rule: allow
+        port: "10250"
+        proto: tcp
+        src: "{{ network_segment }}"
+
+    - name: "UFW | Habilitar firewall"
+      community.general.ufw:
+        state: enabled
+
+# -----------------------------------------------------------------------------
+# TAREA 1.5 — Desactivar swap
+# k3s requiere que el swap esté desactivado para funcionar correctamente.
+# -----------------------------------------------------------------------------
+- name: "TAREA 1.5 | Desactivar swap"
+  hosts: k3s_cluster
+  become: true
+  tasks:
+    - name: Desactivar swap en tiempo de ejecución
+      ansible.builtin.command: swapoff -a
+      changed_when: false   # swapoff es idempotente, no registrar como cambio
+
+    - name: Comentar entrada de swap en /etc/fstab (persistente tras reboot)
+      ansible.builtin.replace:
+        path: /etc/fstab
+        regexp: '^([^#\n].*\s+swap\s+.*)$'
+        replace: '# \1'

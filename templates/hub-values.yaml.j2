@@ -1,0 +1,341 @@
+# ==============================================================================
+# KRNEL — templates/hub-values.yaml.j2
+# Valores para el chart jupyterhub/jupyterhub (Zero-to-JupyterHub MRKOV v2)
+# Renderizado por Ansible — NO editar directamente en el servidor
+#
+# Variables sensibles inyectadas desde Ansible Vault:
+#   - proxy_token
+#   - jupyterhub_admin_pass
+# ==============================================================================
+
+singleuser:
+  image:
+    name: jupyter/all-spark-notebook
+    tag: {{ spark_image_tag }}     # Versión fija — nunca usar latest en producción
+    pullPolicy: IfNotPresent
+  extraEnv:
+    LANG: "C.UTF-8"
+    LANGUAGE: "C.UTF-8"
+    LC_ALL: "C.UTF-8"
+
+  cpu:
+    limit: 1
+    guarantee: 0.5
+  memory:
+    limit: 2G
+    guarantee: 1G
+
+  storage:
+    type: dynamic
+    capacity: 2Gi
+    dynamic:
+      storageClass: {{ storage_class_name }}
+      pvcNameTemplate: claim-{username}
+      volumeNameTemplate: volume-{username}
+      storageAccessModes:
+        - ReadWriteOnce
+    homeMountPath: /home/jovyan
+
+  profileList:
+    # --------------------------------------------------------------------------
+    # 1. PERFIL INVITADO — efímero, sin almacenamiento persistente
+    # SPARK: Modo local[*] únicamente. Sin service_account → no puede lanzar
+    #        executor pods al clúster. Limitado a los recursos del pod.
+    # --------------------------------------------------------------------------
+    - display_name: "Efímero (Invitado)"
+      description: "Max. 4GB RAM / 2 CPU. Sin almacenamiento. Todo se borra al salir."
+      default: true
+      kubespawner_override:
+        cpu_limit: 2
+        cpu_guarantee: 0.5
+        mem_limit: "4G"
+        mem_guarantee: "512M"
+        storage_capacity: "0"
+        volumes:
+          - name: home-emptydir
+            emptyDir: {}
+          - name: nfs-clases
+            nfs: { server: {{ nd1_ip }}, path: {{ nfs_base_path }}/clases }
+          - name: nfs-comunidad
+            nfs: { server: {{ nd1_ip }}, path: {{ nfs_base_path }}/comunidad }
+          - name: nfs-repositorio
+            nfs: { server: {{ nd1_ip }}, path: {{ nfs_base_path }}/repositorio }
+        volume_mounts:
+          - name: home-emptydir
+            mountPath: /home/jovyan
+          - name: nfs-clases
+            mountPath: /home/jovyan/Clases
+            readOnly: true
+          - name: nfs-comunidad
+            mountPath: /home/jovyan/Comunidad
+            readOnly: true
+          - name: nfs-repositorio
+            mountPath: /home/jovyan/Repositorio
+            readOnly: true
+
+    # --------------------------------------------------------------------------
+    # 2. PERFIL COMUNIDAD — Alumnos / Tesistas
+    # SPARK: Modo clúster habilitado vía spark-defaults.conf inyectado en
+    #        postStart. Executors limitados por ResourceQuota del namespace.
+    # --------------------------------------------------------------------------
+    - display_name: "Comunidad"
+      description: "12GB RAM / 8 CPU. 2 GiB persistentes. Escritura en carpeta Comunidad."
+      kubespawner_override:
+        cpu_limit: 8
+        cpu_guarantee: 1
+        mem_limit: "12G"
+        mem_guarantee: "1G"
+        storage_capacity: "2Gi"
+        storage_class: {{ storage_class_name }}
+        storage_access_modes: ["ReadWriteOnce"]
+        service_account: spark-editor
+        lifecycle_hooks:
+          postStart:
+            exec:
+              command:
+                - /bin/bash
+                - -c
+                - |
+                  mkdir -p "$SPARK_HOME/conf"
+                  cat > "$SPARK_HOME/conf/spark-defaults.conf" << 'SPARKEOF'
+                  spark.master                                    k8s://https://kubernetes.default.svc:443
+                  spark.kubernetes.container.image                jupyter/all-spark-notebook:{{ spark_image_tag }}
+                  spark.kubernetes.namespace                      {{ jupyterhub_namespace }}
+                  spark.kubernetes.authenticate.serviceAccountName spark-editor
+                  spark.executor.instances                        {{ spark_executor_instances }}
+                  spark.executor.cores                            {{ spark_executor_cores }}
+                  spark.executor.memory                           {{ spark_executor_memory }}
+                  spark.driver.host                               ${HOSTNAME}.jupyter.{{ jupyterhub_namespace }}.svc.cluster.local
+                  SPARKEOF
+        volumes:
+          - name: nfs-clases
+            nfs: { server: {{ nd1_ip }}, path: {{ nfs_base_path }}/clases }
+          - name: nfs-comunidad
+            nfs: { server: {{ nd1_ip }}, path: {{ nfs_base_path }}/comunidad }
+          - name: nfs-repositorio
+            nfs: { server: {{ nd1_ip }}, path: {{ nfs_base_path }}/repositorio }
+        volume_mounts:
+          - name: nfs-clases
+            mountPath: /home/jovyan/Clases
+            readOnly: true
+          - name: nfs-comunidad
+            mountPath: /home/jovyan/Comunidad
+            readOnly: false
+          - name: nfs-repositorio
+            mountPath: /home/jovyan/Repositorio
+            readOnly: true
+
+    # --------------------------------------------------------------------------
+    # 3. PERFIL PROFESORES
+    # SPARK: Modo clúster habilitado. Misma config que Comunidad.
+    # --------------------------------------------------------------------------
+    - display_name: "Profesor"
+      description: "12GB RAM / 8 CPU. 5 GiB persistentes. Control total de carpetas compartidas."
+      kubespawner_override:
+        cpu_limit: 8
+        cpu_guarantee: 1
+        mem_limit: "12G"
+        mem_guarantee: "1G"
+        storage_capacity: "5Gi"
+        storage_class: {{ storage_class_name }}
+        storage_access_modes: ["ReadWriteOnce"]
+        service_account: spark-editor
+        lifecycle_hooks:
+          postStart:
+            exec:
+              command:
+                - /bin/bash
+                - -c
+                - |
+                  mkdir -p "$SPARK_HOME/conf"
+                  cat > "$SPARK_HOME/conf/spark-defaults.conf" << 'SPARKEOF'
+                  spark.master                                    k8s://https://kubernetes.default.svc:443
+                  spark.kubernetes.container.image                jupyter/all-spark-notebook:{{ spark_image_tag }}
+                  spark.kubernetes.namespace                      {{ jupyterhub_namespace }}
+                  spark.kubernetes.authenticate.serviceAccountName spark-editor
+                  spark.executor.instances                        {{ spark_executor_instances }}
+                  spark.executor.cores                            {{ spark_executor_cores }}
+                  spark.executor.memory                           {{ spark_executor_memory }}
+                  spark.driver.host                               ${HOSTNAME}.jupyter.{{ jupyterhub_namespace }}.svc.cluster.local
+                  SPARKEOF
+        volumes:
+          - name: nfs-clases
+            nfs: { server: {{ nd1_ip }}, path: {{ nfs_base_path }}/clases }
+          - name: nfs-comunidad
+            nfs: { server: {{ nd1_ip }}, path: {{ nfs_base_path }}/comunidad }
+          - name: nfs-repositorio
+            nfs: { server: {{ nd1_ip }}, path: {{ nfs_base_path }}/repositorio }
+        volume_mounts:
+          - name: nfs-clases
+            mountPath: /home/jovyan/Clases
+            readOnly: false
+          - name: nfs-comunidad
+            mountPath: /home/jovyan/Comunidad
+            readOnly: false
+          - name: nfs-repositorio
+            mountPath: /home/jovyan/Repositorio
+            readOnly: false
+
+    # --------------------------------------------------------------------------
+    # 4. PERFIL ADMINISTRADOR
+    # SPARK: Modo clúster habilitado. Sin límite de executors fijo — TI
+    #        puede sobreescribir spark.executor.instances en su SparkSession.
+    # --------------------------------------------------------------------------
+    - display_name: "Administrador (Mantenimiento)"
+      description: "Acceso raíz a datasets. 5 GiB. Uso exclusivo TI."
+      kubespawner_override:
+        cpu_limit: 8
+        cpu_guarantee: 1
+        mem_limit: "12G"
+        mem_guarantee: "1G"
+        storage_capacity: "5Gi"
+        storage_class: {{ storage_class_name }}
+        storage_access_modes: ["ReadWriteOnce"]
+        service_account: spark-editor
+        lifecycle_hooks:
+          postStart:
+            exec:
+              command:
+                - /bin/bash
+                - -c
+                - |
+                  mkdir -p "$SPARK_HOME/conf"
+                  cat > "$SPARK_HOME/conf/spark-defaults.conf" << 'SPARKEOF'
+                  spark.master                                    k8s://https://kubernetes.default.svc:443
+                  spark.kubernetes.container.image                jupyter/all-spark-notebook:{{ spark_image_tag }}
+                  spark.kubernetes.namespace                      {{ jupyterhub_namespace }}
+                  spark.kubernetes.authenticate.serviceAccountName spark-editor
+                  spark.executor.instances                        {{ spark_executor_instances }}
+                  spark.executor.cores                            {{ spark_executor_cores }}
+                  spark.executor.memory                           {{ spark_executor_memory }}
+                  spark.driver.host                               ${HOSTNAME}.jupyter.{{ jupyterhub_namespace }}.svc.cluster.local
+                  SPARKEOF
+        volumes:
+          - name: nfs-clases
+            nfs: { server: {{ nd1_ip }}, path: {{ nfs_base_path }}/clases }
+          - name: nfs-comunidad
+            nfs: { server: {{ nd1_ip }}, path: {{ nfs_base_path }}/comunidad }
+          - name: nfs-repositorio
+            nfs: { server: {{ nd1_ip }}, path: {{ nfs_base_path }}/repositorio }
+        volume_mounts:
+          - name: nfs-clases
+            mountPath: /home/jovyan/Clases
+            readOnly: false
+          - name: nfs-comunidad
+            mountPath: /home/jovyan/Comunidad
+            readOnly: false
+          - name: nfs-repositorio
+            mountPath: /home/jovyan/Repositorio
+            readOnly: false
+
+hub:
+  config:
+    JupyterHub:
+      authenticator_class: native
+      load_groups:
+        invitados: []
+        comunidad: []
+        profesores: []
+      bind_url: http://:8081
+      public_url: "https://{{ jupyterhub_domain }}"
+    Authenticator:
+      admin_users:
+        - {{ jupyterhub_admin_user }}
+    NativeAuthenticator:
+      enable_signup: true
+      open_signup: true
+      minimum_password_length: 8
+
+  db:
+    type: sqlite-pvc
+    pvc:
+      storageClassName: {{ storage_class_name }}
+      accessModes:
+        - ReadWriteOnce
+      storage: 1Gi
+
+  # El allowlist se incrusta directamente desde files/allowlist.txt en tiempo
+  # de renderizado del template — elimina la necesidad de --set-file en Helm.
+  extraFiles:
+    lista_de_correos:
+      mountPath: /etc/jupyterhub/allowlist.txt
+      stringData: |
+        {{ lookup('file', playbook_dir + '/../files/allowlist.txt') | indent(8) }}
+
+  extraConfig:
+    passwords: |
+      c.NativeAuthenticator.admin_password = "{{ jupyterhub_admin_pass }}"
+
+    authenticator-master-filter: |
+      import os
+
+      def load_allowlist():
+          path = '/etc/jupyterhub/allowlist.txt'
+          allowed = set()
+
+          if os.path.exists(path):
+              with open(path, 'r') as f:
+                  for line in f:
+                      user = line.strip().lower()
+                      if user:
+                          allowed.add(user)
+
+          main_admin = "{{ jupyterhub_admin_user }}".lower()
+          if main_admin:
+              allowed.add(main_admin)
+
+          return allowed
+
+      c.Authenticator.allowed_users = load_allowlist()
+
+    logic-grupos: |
+      config_profile_list = c.KubeSpawner.profile_list
+
+      async def filtered_profiles(spawner):
+          if not config_profile_list:
+              return []
+          if spawner.user.admin:
+              return config_profile_list
+
+          user_groups = [g.name for g in spawner.user.groups]
+          mapping = {
+              "invitados":  ["Efímero (Invitado)"],
+              "comunidad":  ["Comunidad"],
+              "profesores": ["Profesor"]
+          }
+
+          allowed_titles = []
+          for group in user_groups:
+              if group in mapping:
+                  allowed_titles.extend(mapping[group])
+
+          if not allowed_titles:
+              return [config_profile_list[0]]
+
+          return [p for p in config_profile_list if p['display_name'] in allowed_titles]
+
+      c.KubeSpawner.profile_list = filtered_profiles
+
+proxy:
+  secretToken: "{{ proxy_token }}"
+  service:
+    type: NodePort
+    nodePorts:
+      http: {{ jupyterhub_port }}
+
+scheduling:
+  userScheduler:
+    enabled: false
+  podPriority:
+    enabled: false
+
+prePuller:
+  hook:
+    enabled: true
+
+cull:
+  enabled: true
+  users: true
+  timeout: 1800    # 30 minutos de inactividad máxima
+  maxAge: 43200    # 12 horas de vida máxima por sesión
+  every: 600

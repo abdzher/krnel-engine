@@ -1,0 +1,136 @@
+---
+# =============================================================================
+# KRNEL — inventories/mrkov/group_vars/all.yml.example
+# Variables globales del clúster MRKOV.
+#
+# IMPORTANTE — Variables sensibles (marcadas con [VAULT]):
+#   Cifrar con: ansible-vault encrypt_string '<valor>' --name '<variable>'
+#   Ejecutar playbooks con: ansible-playbook ... --ask-vault-pass
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Red
+# -----------------------------------------------------------------------------
+network_segment:   "X.X.X.0/24"
+k3s_cluster_cidr:  "172.20.0.0/16"   # CIDR de Pods  — evita colisión con red 10.x
+k3s_service_cidr:  "172.21.0.0/16"   # CIDR de Services
+
+# IPs individuales (referenciadas en plantillas y reglas de firewall)
+nd1_ip: "X.X.X.1"
+nd2_ip: "X.X.X.2"
+nd3_ip: "X.X.X.3"
+nd4_ip: "X.X.X.4"
+
+# Mapa de nodos: usado por /etc/hosts y reglas UFW
+cluster_nodes:
+  - { name: "nd-1", ip: "{{ nd1_ip }}" }
+  - { name: "nd-2", ip: "{{ nd2_ip }}" }
+  - { name: "nd-3", ip: "{{ nd3_ip }}" }
+  - { name: "nd-4", ip: "{{ nd4_ip }}" }
+
+# -----------------------------------------------------------------------------
+# Versiones de software — fijar siempre versiones para reproducibilidad
+# -----------------------------------------------------------------------------
+k3s_version:          "v1.32.4+k3s1"
+helm_version:         "3.17.3"
+cert_manager_version: "v1.20.2"
+jupyterhub_version:   "4.3.3"
+
+# SHA-256 del tarball de Helm para linux/amd64.
+# Obtener en: https://github.com/helm/helm/releases/tag/v{{ helm_version }}
+# Formato:    sha256:<hash>
+helm_checksum: "sha256:REEMPLAZAR_CON_CHECKSUM_SHA256_DE_helm-v3.17.3-linux-amd64.tar.gz"
+
+# -----------------------------------------------------------------------------
+# NFS
+# -----------------------------------------------------------------------------
+nfs_server_ip: "{{ nd1_ip }}"
+nfs_base_path: "/srv/nfs"
+nfs_shares:
+  - jupyter-data   # PVCs dinámicos de JupyterHub (provisionados por NFS-provisioner)
+  - comunidad       # Carpeta compartida de escritura para alumnos
+  - clases          # Carpeta de solo lectura para alumnos, escritura para profesores
+  - repositorio     # Datasets y recursos de solo lectura general
+
+# Storage class creada por el NFS Subdir Provisioner
+storage_class_name: "nfs-master"
+
+# Kubeconfig en el nodo master (usado por módulos kubernetes.core)
+k8s_kubeconfig: "/home/ansible/.kube/config"
+
+# -----------------------------------------------------------------------------
+# VictoriaMetrics
+# -----------------------------------------------------------------------------
+victoria_metrics_release:   "mrkov-monitor"
+victoria_metrics_namespace: "monitoring"
+victoria_metrics_port:      30030
+victoria_metrics_retention: "1"   # Número de meses
+victoria_metrics_storage:   "5Gi"
+
+# -----------------------------------------------------------------------------
+# JupyterHub
+# -----------------------------------------------------------------------------
+jupyterhub_release:    "hub"
+jupyterhub_namespace:  "jupyter"
+jupyterhub_domain:     "jupyter.midominio.com"
+jupyterhub_port:       50080     # puerto donde se expone el JupyterHub a traves de nodeport
+jupyterhub_admin_user: "admin"
+
+# -----------------------------------------------------------------------------
+# Spark on Kubernetes
+# -----------------------------------------------------------------------------
+# Tag fijo de la imagen — verificar disponible en:
+# https://quay.io/repository/jupyter/all-spark-notebook?tab=tags
+# Formato recomendado: spark-X.Y.Z  (comunica versión de Spark explícitamente)
+spark_image_tag: "spark-4.1.0"
+
+# Configuración de los executor pods lanzados al clúster k3s.
+# Estos valores son los defaults — usuarios avanzados pueden sobreescribirlos
+# en su SparkSession, dentro de los límites impuestos por ResourceQuota.
+spark_executor_instances: 2     # Número de executors por job
+spark_executor_cores:     1     # CPUs por executor
+spark_executor_memory:    "2g"  # RAM por executor
+
+# -----------------------------------------------------------------------------
+# ResourceQuota del namespace jupyter
+# Limita el consumo total de recursos para prevenir que jobs de Spark
+# con muchos executors saturen el clúster completo.
+#
+# Guía de dimensionamiento (ajustar según hardware real):
+#   Nodos workers: 3 (nd-2, nd-3, nd-4)
+#   Recursos usables por nodo (estimado ~75% del hardware):
+#     cpu_usable_per_node    × 3 workers = quota_cpu_total
+#     memory_usable_per_node × 3 workers = quota_memory_total
+#   Reservar ~20% para pods del sistema (k3s, NFS provisioner, etc.)
+# -----------------------------------------------------------------------------
+jupyter_quota_pods:            "30"    # máx pods simultáneos en namespace
+jupyter_quota_cpu_requests:    "18"    # suma de cpu requests de todos los pods
+jupyter_quota_cpu_limits:      "24"    # suma de cpu limits de todos los pods
+jupyter_quota_memory_requests: "36Gi"  # suma de memory requests
+jupyter_quota_memory_limits:   "48Gi"  # suma de memory limits
+jupyter_quota_pvcs:            "20"    # máx PVCs (home dirs + extras)
+
+# LimitRange — defaults y topes por pod individual (executor o singleuser)
+jupyter_limit_pod_cpu_default_request:    "500m"
+jupyter_limit_pod_cpu_default_limit:      "1"
+jupyter_limit_pod_cpu_max:                "8"
+jupyter_limit_pod_memory_default_request: "512Mi"
+jupyter_limit_pod_memory_default_limit:   "2Gi"
+jupyter_limit_pod_memory_max:             "12Gi"
+
+# -----------------------------------------------------------------------------
+# [VAULT] Credenciales — NUNCA en texto plano en Git
+# -----------------------------------------------------------------------------
+# Generar proxy_token con: openssl rand -hex 32
+# Cifrar ambas variables con ansible-vault antes de hacer commit.
+proxy_token:            !vault |
+          $ANSIBLE_VAULT...REEMPLAZAR_CON_ANSIBLE_VAULT
+jupyterhub_admin_pass:  !vault |
+          $ANSIBLE_VAULT...REEMPLAZAR_CON_ANSIBLE_VAULT
+
+# -----------------------------------------------------------------------------
+# Control de comportamiento de playbooks
+# -----------------------------------------------------------------------------
+# Activar solo en ventanas de mantenimiento programadas.
+# Uso: ansible-playbook ... -e perform_apt_upgrade=true
+perform_apt_upgrade: false

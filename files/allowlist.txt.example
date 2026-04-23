@@ -1,0 +1,14 @@
+# =============================================================================
+# KRNEL — files/allowlist.txt.example
+# Lista blanca de correos electrónicos autorizados para JupyterHub.
+#
+# INSTRUCCIONES:
+#   1. Copia este archivo: cp allowlist.txt.example allowlist.txt
+#   2. Agrega un correo por línea (sin espacios ni comentarios).
+#   3. El archivo allowlist.txt está en .gitignore — nunca lo versiones.
+#   4. Para actualizar usuarios en producción, modifica allowlist.txt y
+#      re-ejecuta: ansible-playbook playbooks/05-jupyterhub.yml --tags update
+# =============================================================================
+usuario1@institucion.edu.mx
+usuario2@institucion.edu.mx
+profesor1@institucion.edu.mx

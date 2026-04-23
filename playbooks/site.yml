@@ -1,0 +1,41 @@
+---
+# =============================================================================
+# KRNEL — playbooks/site.yml
+# Playbook principal. Importa todos los playbooks en el orden correcto.
+#
+# Uso completo:   ansible-playbook playbooks/site.yml --ask-vault-pass
+# Solo una fase:  ansible-playbook playbooks/site.yml --tags k3s --ask-vault-pass
+# Desde un paso:  ansible-playbook playbooks/site.yml --start-at-task "TAREA 3"
+#
+# Tags disponibles:
+#   prep, system    → 00-system-prep  (apt, hosts, UFW, swap)
+#   k3s             → 01-k3s-install  (Control Plane + Agents)
+#   helm, certmgr   → 02-helm-certmgr (Helm binary + Cert-Manager)
+#   nfs             → 03-nfs-setup    (Servidor NFS + Provisioner)
+#   monitoring, vm  → 04-monitoring   (VictoriaMetrics stack)
+#   jupyter         → 05-jupyterhub   (JupyterHub)
+# =============================================================================
+
+- name: "00 | Preparación del sistema"
+  ansible.builtin.import_playbook: 00-system-prep.yml
+  tags: [prep, system]
+
+- name: "01 | Instalación de k3s"
+  ansible.builtin.import_playbook: 01-k3s-install.yml
+  tags: [k3s]
+
+- name: "02 | Helm y Cert-Manager"
+  ansible.builtin.import_playbook: 02-helm-certmgr.yml
+  tags: [helm, certmgr]
+
+- name: "03 | Configuración NFS y Provisioner"
+  ansible.builtin.import_playbook: 03-nfs-setup.yml
+  tags: [nfs]
+
+- name: "04 | Monitoreo con VictoriaMetrics"
+  ansible.builtin.import_playbook: 04-monitoring.yml
+  tags: [monitoring, vm]
+
+- name: "05 | Despliegue de JupyterHub"
+  ansible.builtin.import_playbook: 05-jupyterhub.yml
+  tags: [jupyter]

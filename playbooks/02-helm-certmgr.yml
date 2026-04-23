@@ -1,0 +1,114 @@
+---
+# =============================================================================
+# KRNEL — playbooks/02-helm-certmgr.yml
+# Tarea 3: Instalación del binario de Helm desde tarball con checksum verificado.
+# Tarea 4: Instalación de Cert-Manager desde manifest con versión fija.
+#
+# Requiere: helm_checksum definido en all.yml
+#           Obtener en: https://github.com/helm/helm/releases/tag/v{{ helm_version }}
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# TAREA 3 — Instalar Helm
+# -----------------------------------------------------------------------------
+- name: "TAREA 3 | Instalar binario de Helm en el nodo master"
+  hosts: master
+  become: true
+  vars:
+    helm_arch:         "linux-amd64"
+    helm_tarball:      "helm-v{{ helm_version }}-{{ helm_arch }}.tar.gz"
+    helm_url:          "https://get.helm.sh/{{ helm_tarball }}"
+    helm_install_path: "/usr/local/bin/helm"
+    helm_tmp_dir:      "/tmp/helm-install-{{ helm_version }}"
+
+  tasks:
+    - name: Verificar si Helm ya está instalado en la versión correcta
+      ansible.builtin.command: "helm version --short"
+      register: helm_current
+      changed_when: false
+      failed_when: false
+
+    - name: Instalar Helm (solo si la versión no coincide)
+      when: helm_version not in (helm_current.stdout | default(''))
+      block:
+        - name: Crear directorio temporal para la descarga
+          ansible.builtin.file:
+            path: "{{ helm_tmp_dir }}"
+            state: directory
+            mode: "0755"
+
+        - name: Descargar tarball de Helm (checksum verificado)
+          ansible.builtin.get_url:
+            url: "{{ helm_url }}"
+            dest: "{{ helm_tmp_dir }}/{{ helm_tarball }}"
+            checksum: "{{ helm_checksum }}"
+            mode: "0644"
+
+        - name: Extraer tarball de Helm
+          ansible.builtin.unarchive:
+            src: "{{ helm_tmp_dir }}/{{ helm_tarball }}"
+            dest: "{{ helm_tmp_dir }}"
+            remote_src: true
+
+        - name: Instalar binario de Helm en /usr/local/bin
+          ansible.builtin.copy:
+            src: "{{ helm_tmp_dir }}/{{ helm_arch }}/helm"
+            dest: "{{ helm_install_path }}"
+            owner: root
+            group: root
+            mode: "0755"
+            remote_src: true
+
+        - name: Limpiar directorio temporal
+          ansible.builtin.file:
+            path: "{{ helm_tmp_dir }}"
+            state: absent
+
+    - name: Confirmar versión de Helm instalada
+      ansible.builtin.command: helm version --short
+      changed_when: false
+      register: helm_ver_final
+
+    - name: Mostrar versión de Helm
+      ansible.builtin.debug:
+        msg: "Helm listo: {{ helm_ver_final.stdout }}"
+
+# -----------------------------------------------------------------------------
+# TAREA 4 — Instalar Cert-Manager
+# -----------------------------------------------------------------------------
+- name: "TAREA 4 | Instalar Cert-Manager"
+  hosts: master
+  become: false
+  vars:
+    cert_manager_manifest: "/tmp/cert-manager-{{ cert_manager_version }}.yaml"
+  tasks:
+    - name: Descargar manifest de Cert-Manager (versión fija, cacheado en /tmp)
+      ansible.builtin.get_url:
+        url: "https://github.com/cert-manager/cert-manager/releases/download/{{ cert_manager_version }}/cert-manager.yaml"
+        dest: "{{ cert_manager_manifest }}"
+        mode: "0644"
+        force: false   # No re-descargar si ya existe en /tmp
+
+    - name: Aplicar manifest de Cert-Manager al clúster
+      kubernetes.core.k8s:
+        kubeconfig: "{{ k8s_kubeconfig }}"
+        state: present
+        src: "{{ cert_manager_manifest }}"
+
+    - name: Esperar a que los Deployments de Cert-Manager estén disponibles
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ k8s_kubeconfig }}"
+        kind: Deployment
+        namespace: cert-manager
+        label_selectors:
+          - "app.kubernetes.io/instance=cert-manager"
+        wait: true
+        wait_condition:
+          type: Available
+          status: "True"
+        wait_timeout: 180
+      register: cm_status
+
+    - name: Confirmar despliegue de Cert-Manager
+      ansible.builtin.debug:
+        msg: "Cert-Manager {{ cert_manager_version }} instalado y operativo."

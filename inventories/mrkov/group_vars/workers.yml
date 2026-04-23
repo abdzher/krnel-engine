@@ -1,0 +1,13 @@
+---
+# =============================================================================
+# KRNEL — group_vars/workers.yml
+# Variables específicas de los nodos worker (nd-2, nd-3, nd-4): Agentes k3s.
+# =============================================================================
+
+# --- PyrateLabs.k3s role ---
+k3s_control_node: false
+k3s_agent:
+  node-ip:       "{{ ansible_host }}"
+  flannel-iface: "{{ node_iface }}"
+
+is_nfs_server: false

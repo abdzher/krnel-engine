@@ -1,0 +1,61 @@
+# ==============================================================================
+# KRNEL — templates/spark-quota.yaml.j2
+# ResourceQuota y LimitRange para el namespace {{ jupyterhub_namespace }}.
+#
+# Objetivo: evitar que jobs de Spark con muchos executor pods saturen el
+# clúster completo. El ResourceQuota limita el consumo TOTAL del namespace.
+# El LimitRange impone defaults y topes por pod INDIVIDUAL.
+#
+# Ajustar variables en group_vars/all.yml antes de desplegar:
+#   jupyter_quota_*        → dimensionado según hardware real del clúster
+#   jupyter_limit_pod_*    → topes por executor / pod singleuser
+# ==============================================================================
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: jupyter-namespace-quota
+  namespace: {{ jupyterhub_namespace }}
+  labels:
+    app.kubernetes.io/part-of: jupyterhub
+    app.kubernetes.io/component: resource-governance
+spec:
+  hard:
+    # Número máximo de pods simultáneos en el namespace
+    # (singleuser + executor pods de Spark + hub/proxy)
+    pods: "{{ jupyter_quota_pods }}"
+
+    # Suma de todos los cpu requests del namespace
+    requests.cpu: "{{ jupyter_quota_cpu_requests }}"
+    # Suma de todos los cpu limits del namespace
+    limits.cpu: "{{ jupyter_quota_cpu_limits }}"
+
+    # Suma de todos los memory requests del namespace
+    requests.memory: "{{ jupyter_quota_memory_requests }}"
+    # Suma de todos los memory limits del namespace
+    limits.memory: "{{ jupyter_quota_memory_limits }}"
+
+    # Número máximo de PersistentVolumeClaims (home dirs + extras)
+    persistentvolumeclaims: "{{ jupyter_quota_pvcs }}"
+---
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: jupyter-pod-limits
+  namespace: {{ jupyterhub_namespace }}
+  labels:
+    app.kubernetes.io/part-of: jupyterhub
+    app.kubernetes.io/component: resource-governance
+spec:
+  limits:
+    # Límites por contenedor individual.
+    # Aplica a executor pods de Spark que no declaren sus propios recursos.
+    - type: Container
+      default:
+        cpu:    "{{ jupyter_limit_pod_cpu_default_limit }}"
+        memory: "{{ jupyter_limit_pod_memory_default_limit }}"
+      defaultRequest:
+        cpu:    "{{ jupyter_limit_pod_cpu_default_request }}"
+        memory: "{{ jupyter_limit_pod_memory_default_request }}"
+      max:
+        cpu:    "{{ jupyter_limit_pod_cpu_max }}"
+        memory: "{{ jupyter_limit_pod_memory_max }}"

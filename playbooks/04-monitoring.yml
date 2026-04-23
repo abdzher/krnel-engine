@@ -1,0 +1,64 @@
+---
+# =============================================================================
+# KRNEL — playbooks/04-monitoring.yml
+# Tarea 7: Despliegue del stack de VictoriaMetrics para monitoreo del clúster.
+# Reemplaza prometheus+grafana con una solución de mayor rendimiento.
+# =============================================================================
+
+- name: "TAREA 7 | Desplegar VictoriaMetrics K8s Stack"
+  hosts: master
+  become: false
+  vars:
+    vm_values_tmp: "/tmp/vm-values-{{ ansible_date_time.epoch }}.yaml"
+
+  tasks:
+    - name: Agregar repositorio Helm de VictoriaMetrics
+      kubernetes.core.helm_repository:
+        kubeconfig: "{{ k8s_kubeconfig }}"
+        name: vm
+        repo_url: "https://victoriametrics.github.io/helm-charts/"
+        state: present
+
+    - name: Renderizar vm-values.yaml desde plantilla Jinja2
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../templates/vm-values.yaml.j2"
+        dest: "{{ vm_values_tmp }}"
+        mode: "0644"
+
+    - name: Instalar/Actualizar VictoriaMetrics K8s Stack (upgrade --install)
+      kubernetes.core.helm:
+        kubeconfig: "{{ k8s_kubeconfig }}"
+        name: "{{ victoria_metrics_release }}"
+        chart_ref: vm/victoria-metrics-k8s-stack
+        release_namespace: "{{ victoria_metrics_namespace }}"
+        create_namespace: true
+        values_files:
+          - "{{ vm_values_tmp }}"
+        update_repo_cache: true
+        state: present
+
+    - name: Limpiar archivo temporal de values
+      ansible.builtin.file:
+        path: "{{ vm_values_tmp }}"
+        state: absent
+
+    - name: Verificar que el pod de Grafana está corriendo
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ k8s_kubeconfig }}"
+        kind: Deployment
+        namespace: "{{ victoria_metrics_namespace }}"
+        label_selectors:
+          - "app.kubernetes.io/name=grafana"
+        wait: true
+        wait_condition:
+          type: Available
+          status: "True"
+        wait_timeout: 180
+      register: grafana_status
+      ignore_errors: true   # No bloquear si Grafana tarda más de lo esperado
+
+    - name: Confirmar despliegue de monitoreo
+      ansible.builtin.debug:
+        msg: >
+          VictoriaMetrics stack '{{ victoria_metrics_release }}' desplegado en
+          namespace '{{ victoria_metrics_namespace }}'. Grafana accesible en NodePort {{ victoria_metrics_port }}.
