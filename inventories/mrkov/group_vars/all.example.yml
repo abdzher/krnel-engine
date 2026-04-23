@@ -83,7 +83,7 @@ jupyterhub_admin_user: "admin"
 # Tag fijo de la imagen — verificar disponible en:
 # https://quay.io/repository/jupyter/all-spark-notebook?tab=tags
 # Formato recomendado: spark-X.Y.Z  (comunica versión de Spark explícitamente)
-spark_image_tag: "spark-4.1.0"
+spark_image_tag: "spark-4.1.1"
 
 # Configuración de los executor pods lanzados al clúster k3s.
 # Estos valores son los defaults — usuarios avanzados pueden sobreescribirlos

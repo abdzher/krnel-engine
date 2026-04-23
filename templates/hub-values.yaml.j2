@@ -10,7 +10,7 @@
 
 singleuser:
   image:
-    name: jupyter/all-spark-notebook
+    name: quay.io/jupyter/all-spark-notebook
     tag: {{ spark_image_tag }}     # Versión fija — nunca usar latest en producción
     pullPolicy: IfNotPresent
   extraEnv:
@@ -260,7 +260,7 @@ hub:
     lista_de_correos:
       mountPath: /etc/jupyterhub/allowlist.txt
       stringData: |
-        {{ lookup('file', playbook_dir + '/../files/allowlist.txt') | indent(8) }}
+        {{ lookup('file', allowlist_path | default(playbook_dir + '/../files/allowlist.txt')) | indent(8) }}
 
   extraConfig:
     passwords: |

@@ -1,0 +1,47 @@
+---
+# =============================================================================
+# KRNEL — playbooks/mantenimiento/update-jupyterhub-config.yml
+# 
+# Actualiza de manera segura la configuración de JupyterHub en vivo.
+# Utiliza Helm para aplicar cambios en `hub-values.yaml.j2` o en la lista
+# de correos `allowlist.txt` SIN borrar los datos de los usuarios (PVCs)
+# ni la base de datos de JupyterHub (sqlite-pvc).
+#
+# Uso: 
+#   ansible-playbook -i inventories/mrkov playbooks/mantenimiento/update-jupyterhub-config.yml -K
+# =============================================================================
+
+- name: "MANTENIMIENTO | Actualizar Configuración de JupyterHub"
+  hosts: master
+  become: false
+  tasks:
+    - name: Crear archivo temporal para valores
+      ansible.builtin.tempfile:
+        state: file
+        suffix: -hub.yaml
+      register: tmp_hub_values
+
+    - name: Renderizar hub-values.yaml desde plantilla Jinja2
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../../templates/hub-values.yaml.j2"
+        dest: "{{ tmp_hub_values.path }}"
+        mode: "0600"
+      vars:
+        allowlist_path: "{{ playbook_dir }}/../../files/allowlist.txt"
+
+    - name: Actualizar Release de JupyterHub en el clúster
+      kubernetes.core.helm:
+        kubeconfig: "{{ k8s_kubeconfig }}"
+        name: "{{ jupyterhub_release }}"
+        chart_ref: jupyterhub/jupyterhub
+        release_namespace: "{{ jupyterhub_namespace }}"
+        chart_version: "{{ jupyterhub_version }}"
+        values_files:
+          - "{{ tmp_hub_values.path }}"
+        update_repo_cache: false
+        state: present
+
+    - name: Limpiar archivo temporal
+      ansible.builtin.file:
+        path: "{{ tmp_hub_values.path }}"
+        state: absent
