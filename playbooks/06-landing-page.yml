@@ -17,12 +17,6 @@
         kind: Namespace
         state: present
 
-    - name: Renderizar HTML del portal a un archivo temporal
-      ansible.builtin.template:
-        src: "{{ playbook_dir }}/../templates/landing-page.html.j2"
-        dest: "/tmp/landing-page.html"
-        mode: "0644"
-
     - name: Crear ConfigMap con el código de la Landing Page
       kubernetes.core.k8s:
         kubeconfig: "{{ k8s_kubeconfig }}"
@@ -34,7 +28,7 @@
             name: portal-html
             namespace: krnel-portal
           data:
-            index.html: "{{ lookup('file', '/tmp/landing-page.html') }}"
+            index.html: "{{ lookup('template', playbook_dir + '/../templates/landing-page.html.j2') }}"
 
     - name: Desplegar NGINX para servir el portal
       kubernetes.core.k8s:
@@ -117,8 +111,3 @@
                           name: portal-service
                           port:
                             number: 80
-
-    - name: Limpiar archivo temporal HTML
-      ansible.builtin.file:
-        path: "/tmp/landing-page.html"
-        state: absent
