@@ -50,7 +50,7 @@ singleuser:
         cpu_guarantee: 0.5
         mem_limit: "4G"
         mem_guarantee: "512M"
-        storage_capacity: "0"
+        storage_pvc_ensure: False
         volumes:
           - name: home-emptydir
             emptyDir: {}
@@ -331,7 +331,7 @@ scheduling:
 
 prePuller:
   hook:
-    enabled: true
+    enabled: false
 
 cull:
   enabled: true

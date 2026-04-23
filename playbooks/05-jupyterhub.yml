@@ -47,7 +47,7 @@
       ansible.builtin.fail:
         msg: >
           No se encontró 'files/allowlist.txt'.
-          Copia 'files/allowlist.txt.example' a 'files/allowlist.txt' y
+          Copia 'files/allowlist.example.txt' a 'files/allowlist.txt' y
           agrega los correos autorizados (uno por línea).
       when: not allowlist_stat.stat.exists
 
@@ -73,7 +73,7 @@
     - name: Renderizar spark-quota.yaml desde plantilla
       ansible.builtin.template:
         src: "{{ playbook_dir }}/../templates/spark-quota.yaml.j2"
-        dest: "/tmp/spark-quota-{{ ansible_date_time.epoch }}.yaml"
+        dest: "/tmp/spark-quota-{{ ansible_facts['date_time']['epoch'] }}.yaml"
         mode: "0644"
       register: quota_tmp
 

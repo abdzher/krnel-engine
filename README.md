@@ -100,3 +100,24 @@ ansible-playbook -i inventories/mrkov playbooks/05-jupyterhub.yml --ask-vault-pa
 ```
 
 **(Asegúrate de ejecutar los playbooks en el orden numérico correcto según estén nombrados en la carpeta `playbooks/`).**
+
+
+### Troubleshooting de validación del webhook
+
+Si al ejecutar el playbook de monitoreo recibes errores de validación de webhook (por ejemplo: "Admission webhook 'victoria-metrics-operator.default.svc' rejected the request"), es necesario eliminar el recurso huérfano antes de volver a ejecutar el playbook.
+
+Ejecuta el siguiente comando para limpiar los webhooks:
+
+```bash
+ansible-playbook -i inventories/mrkov playbooks/utils/uninstall-monitoring.yml -K
+```
+
+### Acceso a Grafana
+
+Para acceder a Grafana, primero debes obtener la contraseña del usuario por defecto `admin`:
+
+```bash
+kubectl get secret --namespace monitoring mrkovmonitor-grafana -o jsonpath="{.data.admin-password}" | base64 --decode ; echo
+```
+
+Utiliza el usuario `admin` y la contraseña obtenida en el paso anterior para acceder a la interfaz web de Grafana en la dirección: http://<node_ip>:<victoria_metrics_port>
