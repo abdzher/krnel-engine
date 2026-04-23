@@ -1,0 +1,37 @@
+---
+# =============================================================================
+# KRNEL — playbooks/utils/uninstall-monitoring.yml
+# Desinstala el stack de VictoriaMetrics y elimina su namespace asociado.
+#
+# Uso: 
+#   ansible-playbook -i inventories/mrkov playbooks/utils/uninstall-monitoring.yml -K
+# =============================================================================
+
+- name: "UTILIDAD | Desinstalar VictoriaMetrics K8s Stack"
+  hosts: master
+  become: false
+  tasks:
+    - name: Desinstalar release de Helm de VictoriaMetrics
+      kubernetes.core.helm:
+        kubeconfig: "{{ k8s_kubeconfig }}"
+        name: "{{ victoria_metrics_release }}"
+        release_namespace: "{{ victoria_metrics_namespace }}"
+        state: absent
+      ignore_errors: true
+
+    - name: Limpiar ValidatingWebhookConfigurations huérfanos
+      ansible.builtin.shell: |
+        kubectl --kubeconfig {{ k8s_kubeconfig }} get validatingwebhookconfigurations -o name | grep victoria-metrics | xargs -r kubectl --kubeconfig {{ k8s_kubeconfig }} delete
+      ignore_errors: true
+
+    - name: Limpiar MutatingWebhookConfigurations huérfanos
+      ansible.builtin.shell: |
+        kubectl --kubeconfig {{ k8s_kubeconfig }} get mutatingwebhookconfigurations -o name | grep victoria-metrics | xargs -r kubectl --kubeconfig {{ k8s_kubeconfig }} delete
+      ignore_errors: true
+
+    - name: Eliminar namespace de monitoreo
+      kubernetes.core.k8s:
+        kubeconfig: "{{ k8s_kubeconfig }}"
+        name: "{{ victoria_metrics_namespace }}"
+        kind: Namespace
+        state: absent

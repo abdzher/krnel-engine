@@ -30,6 +30,13 @@ grafana:
 vmagent:
   enabled: true
 
+# VMAlert — evaluador de reglas de alertas y métricas derivadas
+vmalert:
+  enabled: true
+  spec:
+    extraArgs:
+      notifier.blackhole: "true"
+
 # AlertManager — desactivado (no requerido en esta fase)
 alertmanager:
   enabled: false

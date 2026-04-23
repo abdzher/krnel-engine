@@ -6,7 +6,7 @@
 # PRE-REQUISITOS antes de ejecutar:
 #   1. proxy_token y jupyterhub_admin_pass deben estar cifrados en Ansible Vault.
 #      ansible-vault encrypt_string "$(openssl rand -hex 32)" --name proxy_token
-#      ansible-vault encrypt_string "dicifo2026" --name jupyterhub_admin_pass
+#      ansible-vault encrypt_string "contraseñasegura" --name jupyterhub_admin_pass
 #   2. Copiar files/allowlist.txt.example a files/allowlist.txt y agregar
 #      los correos electrónicos autorizados (uno por línea).
 #

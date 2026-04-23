@@ -61,7 +61,8 @@ k8s_kubeconfig: "/home/ansible/.kube/config"
 # -----------------------------------------------------------------------------
 # VictoriaMetrics
 # -----------------------------------------------------------------------------
-victoria_metrics_release:   "mrkov-monitor"
+victoria_metrics_version:   "0.74.1"
+victoria_metrics_release:   "mrkovmonitor"
 victoria_metrics_namespace: "monitoring"
 victoria_metrics_port:      30030
 victoria_metrics_retention: "1"   # Número de meses

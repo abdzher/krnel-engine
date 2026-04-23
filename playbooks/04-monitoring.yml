@@ -9,7 +9,7 @@
   hosts: master
   become: false
   vars:
-    vm_values_tmp: "/tmp/vm-values-{{ ansible_date_time.epoch }}.yaml"
+    vm_values_tmp: "/tmp/vm-values-{{ ansible_facts['date_time']['epoch'] }}.yaml"
 
   tasks:
     - name: Agregar repositorio Helm de VictoriaMetrics
@@ -30,6 +30,7 @@
         kubeconfig: "{{ k8s_kubeconfig }}"
         name: "{{ victoria_metrics_release }}"
         chart_ref: vm/victoria-metrics-k8s-stack
+        chart_version: "{{ victoria_metrics_version }}"
         release_namespace: "{{ victoria_metrics_namespace }}"
         create_namespace: true
         values_files:
