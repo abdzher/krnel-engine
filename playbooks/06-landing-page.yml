@@ -1,0 +1,124 @@
+---
+# =============================================================================
+# KRNEL — playbooks/06-landing-page.yml
+# Despliega el portal central (Landing Page) expuesto en la raíz del dominio
+# a través de Traefik. Sirve como índice para JupyterHub y Grafana.
+# =============================================================================
+
+- name: "TAREA 8 | Desplegar Landing Page"
+  hosts: master
+  become: false
+  tasks:
+    - name: Crear namespace para el landing page
+      kubernetes.core.k8s:
+        kubeconfig: "{{ k8s_kubeconfig }}"
+        name: krnel-portal
+        api_version: v1
+        kind: Namespace
+        state: present
+
+    - name: Renderizar HTML del portal a un archivo temporal
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../templates/landing-page.html.j2"
+        dest: "/tmp/landing-page.html"
+        mode: "0644"
+
+    - name: Crear ConfigMap con el código de la Landing Page
+      kubernetes.core.k8s:
+        kubeconfig: "{{ k8s_kubeconfig }}"
+        state: present
+        definition:
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: portal-html
+            namespace: krnel-portal
+          data:
+            index.html: "{{ lookup('file', '/tmp/landing-page.html') }}"
+
+    - name: Desplegar NGINX para servir el portal
+      kubernetes.core.k8s:
+        kubeconfig: "{{ k8s_kubeconfig }}"
+        state: present
+        definition:
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: portal-web
+            namespace: krnel-portal
+          spec:
+            replicas: 1
+            selector:
+              matchLabels:
+                app: portal
+            template:
+              metadata:
+                labels:
+                  app: portal
+              spec:
+                containers:
+                  - name: nginx
+                    image: nginx:alpine
+                    ports:
+                      - containerPort: 80
+                    volumeMounts:
+                      - name: html-volume
+                        mountPath: /usr/share/nginx/html
+                    resources:
+                      limits:
+                        cpu: "100m"
+                        memory: "64Mi"
+                      requests:
+                        cpu: "50m"
+                        memory: "32Mi"
+                volumes:
+                  - name: html-volume
+                    configMap:
+                      name: portal-html
+
+    - name: Crear Servicio interno para el portal
+      kubernetes.core.k8s:
+        kubeconfig: "{{ k8s_kubeconfig }}"
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: portal-service
+            namespace: krnel-portal
+          spec:
+            selector:
+              app: portal
+            ports:
+              - port: 80
+                targetPort: 80
+
+    - name: Crear Ingress (Traefik) apuntando a la raíz
+      kubernetes.core.k8s:
+        kubeconfig: "{{ k8s_kubeconfig }}"
+        state: present
+        definition:
+          apiVersion: networking.k8s.io/v1
+          kind: Ingress
+          metadata:
+            name: portal-ingress
+            namespace: krnel-portal
+            annotations:
+              kubernetes.io/ingress.class: traefik
+          spec:
+            rules:
+              - host: "{{ jupyterhub_domain }}"
+                http:
+                  paths:
+                    - path: /
+                      pathType: Prefix
+                      backend:
+                        service:
+                          name: portal-service
+                          port:
+                            number: 80
+
+    - name: Limpiar archivo temporal HTML
+      ansible.builtin.file:
+        path: "/tmp/landing-page.html"
+        state: absent

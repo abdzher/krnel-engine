@@ -237,7 +237,7 @@ hub:
         comunidad: []
         profesores: []
       bind_url: http://:8081
-      public_url: "https://{{ jupyterhub_domain }}"
+      base_url: "/hub/"
     Authenticator:
       admin_users:
         - {{ jupyterhub_admin_user }}
@@ -339,3 +339,10 @@ cull:
   timeout: 1800    # 30 minutos de inactividad máxima
   maxAge: 43200    # 12 horas de vida máxima por sesión
   every: 600
+
+ingress:
+  enabled: true
+  annotations:
+    kubernetes.io/ingress.class: traefik
+  hosts:
+    - "{{ jupyterhub_domain }}"

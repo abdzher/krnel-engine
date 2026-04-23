@@ -21,10 +21,22 @@ grafana:
   enabled: true
   persistence:
     enabled: true
-    storageClassName: {{ storage_class_name }}   # CORREGIDO: era 'nfs-client', debe ser '{{ storage_class_name }}'
+    storageClassName: {{ storage_class_name }}
   service:
     type: NodePort
     nodePort: {{ victoria_metrics_port }}
+  ingress:
+    enabled: true
+    annotations:
+      kubernetes.io/ingress.class: traefik
+    hosts:
+      - "{{ jupyterhub_domain }}"
+    path: /grafana
+  grafana.ini:
+    server:
+      domain: "{{ jupyterhub_domain }}"
+      root_url: "%(protocol)s://%(domain)s/grafana"
+      serve_from_sub_path: true
 
 # VMAgent — recolector de métricas del clúster
 vmagent:
