@@ -1,5 +1,0 @@
-- name: "TAREA 0 | Verificar conectividad con todos los nodos"
-  hosts: k3s_cluster
-  tasks:
-    - name: Ping a todos los nodos del clúster
-      ansible.builtin.ping:

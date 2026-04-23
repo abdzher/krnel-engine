@@ -2,19 +2,19 @@
 # =============================================================================
 # KRNEL — playbooks/01-k3s-install.yml
 # Tarea 2: Instalación de k3s sobre todos los nodos usando el rol
-# PyrateLabs.k3s (idempotente, con versión fija, gestión automática de tokens).
+# xanmanning.k3s (idempotente, con versión fija, gestión automática de tokens).
 #
 # El rol lee k3s_control_node desde group_vars/master.yml y workers.yml
 # para diferenciar entre Control Plane y Agents automáticamente.
 #
-# Documentación del rol: https://github.com/PyrateLabs/ansible-role-k3s
+# Documentación del rol: https://github.com/xanmanning/ansible-role-k3s
 # =============================================================================
 
 - name: "TAREA 2 | Instalar k3s en todos los nodos del clúster"
   hosts: k3s_cluster
   become: true
   roles:
-    - role: PyratLabs.k3s
+    - role: xanmanning.k3s
       vars:
         k3s_become:          true
         k3s_release_version: "{{ k3s_version }}"
