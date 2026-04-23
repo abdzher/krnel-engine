@@ -36,6 +36,11 @@
         update_cache: false
       when: perform_apt_upgrade | default(false) | bool
 
+    - name: Instalar dependencias de Python para Ansible (kubernetes)
+      ansible.builtin.apt:
+        name: python3-kubernetes
+        state: present
+
 # -----------------------------------------------------------------------------
 # TAREA 1 — /etc/hosts y UFW
 # -----------------------------------------------------------------------------
