@@ -59,8 +59,8 @@ Antes de ejecutar cualquier playbook, necesitas configurar las variables de red 
    ```
 2. Copia el archivo de ejemplo para crear tu configuración real. (El archivo `all.yml` está protegido en `.gitignore` para que no subas tus IPs o secretos accidentalmente):
    ```bash
-   cp hosts.ini.example hosts.ini
-   cp group_vars/all.yml.example group_vars/all.yml
+   cp hosts.example.ini hosts.ini
+   cp group_vars/all.example.yml group_vars/all.yml
    ```
 3. Edita `all.yml` y reemplaza los valores de ejemplo (como las IPs `X.X.X.X` y los dominios) por los valores reales de tus servidores físicos o máquinas virtuales.
 
@@ -93,10 +93,10 @@ Para aplicar la configuración a tus nodos, ejecuta los playbooks proporcionados
 
 ```bash
 # Ejemplo: Instalación base de K3s
-ansible-playbook -i inventories/mrkov playbooks/01-k3s-install.yml --ask-vault-pass
+ansible-playbook -i inventories/mrkov playbooks/01-k3s-install.yml --ask-vault-pass --ask-become-pass
 
 # Ejemplo: Despliegue de JupyterHub
-ansible-playbook -i inventories/mrkov playbooks/05-jupyterhub.yml --ask-vault-pass
+ansible-playbook -i inventories/mrkov playbooks/05-jupyterhub.yml --ask-vault-pass --ask-become-pass
 ```
 
 **(Asegúrate de ejecutar los playbooks en el orden numérico correcto según estén nombrados en la carpeta `playbooks/`).**
