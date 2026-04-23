@@ -1,0 +1,37 @@
+---
+# =============================================================================
+# KRNEL — playbooks/utils/uninstall-k3s.yml
+# Desinstala K3s completamente de los nodos del clúster usando los scripts
+# nativos de k3s (k3s-uninstall.sh para master y k3s-agent-uninstall.sh para workers).
+#
+# Uso: 
+#   ansible-playbook -i inventories/mrkov playbooks/utils/uninstall-k3s.yml -K
+# =============================================================================
+
+- name: "UTILIDAD | Desinstalar K3s en nodos Worker (Agents)"
+  hosts: workers
+  become: true
+  tasks:
+    - name: Verificar si k3s-agent-uninstall.sh existe
+      ansible.builtin.stat:
+        path: /usr/local/bin/k3s-agent-uninstall.sh
+      register: k3s_agent_uninstall
+
+    - name: Ejecutar script de desinstalación de agente
+      ansible.builtin.command: /usr/local/bin/k3s-agent-uninstall.sh
+      when: k3s_agent_uninstall.stat.exists
+      changed_when: true
+
+- name: "UTILIDAD | Desinstalar K3s en el nodo Master (Control Plane)"
+  hosts: master
+  become: true
+  tasks:
+    - name: Verificar si k3s-uninstall.sh existe
+      ansible.builtin.stat:
+        path: /usr/local/bin/k3s-uninstall.sh
+      register: k3s_master_uninstall
+
+    - name: Ejecutar script de desinstalación de master
+      ansible.builtin.command: /usr/local/bin/k3s-uninstall.sh
+      when: k3s_master_uninstall.stat.exists
+      changed_when: true

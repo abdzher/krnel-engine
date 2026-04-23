@@ -21,10 +21,10 @@ Activa tu entorno virtual (necesario para usar las dependencias locales):
 source .venv/bin/activate
 ```
 
-Instala Ansible en tu sistema utilizando las herramientas de `uv`:
+Instala Ansible y la librería requerida (netaddr) en tu sistema utilizando las herramientas de `uv`:
 
 ```bash
-uv tool install ansible-core --with ansible
+uv tool install ansible-core --with ansible --with netaddr --force
 ```
 
 Para asegurarte de que los binarios de Ansible (como `ansible-playbook`, `ansible-galaxy` y `ansible-vault`) estén disponibles en tu `PATH`, ejecuta:
