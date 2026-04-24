@@ -1,6 +1,25 @@
 # KRNEL Engine
 
-KRNEL Engine es la infraestructura basada en Ansible para el despliegue y gestión de un clúster K3s bare-metal con JupyterHub y Apache Spark.
+KRNEL Engine es la infraestructura basada en Ansible para el despliegue y gestión de un clúster K3s bare-metal con JupyterHub y Apache Spark, dirigido a su uso en el clúster MRKOV (la compatibilidad con otro hardware no está del todo garantizada).
+
+## Características
+
+- Configuración de red mediante ufw.
+- Despliegue automático de nfs server y su motor para storageClasses.
+- Despliegue automático de K3s en múltiples nodos.
+- Despliegue automático de JupyterHub.
+- Despliegue automático de Apache Spark (bajo la imagen de JupyterHub: all-spark).
+- Despliegue automático de Grafana.
+- Despliegue automático de Victoria Metrics.
+- Despliegue automático de Nginx.
+
+Dentro del portal de JupyterHub, puedes esperar:
+
+- Autenticación nativa + filtro por lista blanca (whitelist) de usuarios.
+- Gestión de grupos: invitados (almacenamiento efímero), estudiantes (almacenamiento persistente), profesores (almacenamiento persistente y repositorio para clases en modo escritura) y administrador.
+- Spark preconfigurado para usar los recursos del clúster desde notebooks de JupyterHub.
+- Repositorios para los usuarios en el servidor NFS: carpeta de clases, datasets y una adicional para uso general.
+
 
 ## Requisitos Previos
 
@@ -128,17 +147,39 @@ Utiliza el usuario `admin` y la contraseña obtenida en el paso anterior para ac
 Para acceder a JupyterHub, primero debes registrar el usuario administrador con el usuario y contraseña definida en las variables globales. Posteriormente solo inicia sesión.
 
 
+### Utilidades
+
+Se agregaron playbooks de utilidades en la carpeta `playbooks/utils`. Puede ejecutarlos de manera similar a los playbooks principales:
+
+```bash
+#Reiniciar JupyterHub
+ansible-playbook -i inventories/mrkov playbooks/utils/restart-jupyterhub.yml --ask-become-pass --ask-vault-pass
+```
+
+
+
 ### Bugs conocidos
 
-* [Crítico] PVC no consistente: El almacenamiento persistente no funciona correctamente. 
-* [Crítico] Spark no inicia: Los pods de Spark no se inician correctamente, parece ser un problema con la red interna del clúster.
+* [ ] PVC no consistente: El almacenamiento persistente no funciona correctamente. ¡Crítico! 
+* [ ] Pérdida de usuarios: Los usuarios pierden el acceso a JupyterHub después de un tiempo. ¡Crítico!
+* [ ] Spark no consistente: Inicia pero puede tener errores al solicitar más recursos de los predeterminados. 
 
 ### Futuras implementaciones
 
+* [ ] Añadir componentes para la identidad de los usuarios (comando personalizado krnel y template para JupyterHub)
+* [ ] Implementar resiliencia en caso de apagones.
+* [ ] Implementar copias de seguridad automáticas.
 * [ ] Añadir playbooks de prueba para verificar la instalación.
 * [ ] Mejores Notebooks de ejemplo para el repositorio.
 * [ ] Migración de SQlite a PostgreSQL para la base de datos de JupyterHub.
 * [ ] Implementar PostgreSQL como servicio del clúster para los usuarios.
-* [ ] Implementar resiliencia en caso de apagones.
-* [ ] Implementar copias de seguridad automáticas.
+* [ ] Implementar MinIO en el clúster para almacenamiento de datos.
+* [ ] Implementar el uso de una rama para pruebas (develop) antes de subir a producción.
 * [ ] Añadir soporte para GPU.
+
+### Próximos releases
+
+* [ ] Versión 0.1.0: Despliegue del stack JupyterHub, Spark y Grafana en un clúster K3s bare-metal (próximo, al arreglar bugs conocidos).
+* [ ] Versión 0.2.0: Añadir componentes para la identidad de los usuarios.
+* ...
+* [ ] Versión 1.0.0: Despliegue completo con todas las funcionalidades básicas y resiliencia a fallos (posterior a pruebas).
