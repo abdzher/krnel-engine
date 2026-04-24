@@ -2,11 +2,13 @@
 .venv/
 # Ansible Collections
 collections/
-
+# Temporal files
+tmp/
 # Ansible roles
 roles/
 
 # Ignorar configuración sensible (vars de ansible, IPs, etc)
 inventories/mrkov/group_vars/all.yml
 inventories/mrkov/hosts.ini
+inventories/mrkov/hosts.bkp.ini
 files/allowlist.txt

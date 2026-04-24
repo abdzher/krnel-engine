@@ -1,0 +1,409 @@
+---
+# =============================================================================
+# KRNEL — playbooks/utils/diagnose-spark-infra.yml
+# Diagnóstico profundo de infraestructura para Spark sobre K3s.
+#
+# Analiza TODAS las capas: K3s, red, firewall, iptables, DNS, y conectividad
+# entre nodos y pods. Genera un reporte completo para diagnóstico.
+#
+# Uso:
+#   ansible-playbook -i inventories/mrkov playbooks/utils/diagnose-spark-infra.yml -K
+# =============================================================================
+
+# =============================================================================
+# FASE 1: DIAGNÓSTICO DEL MASTER (nd-1)
+# =============================================================================
+- name: "DIAG FASE 1 | Estado del API Server en el Master"
+  hosts: master
+  become: true
+  tasks:
+    # --- 1.1: ¿K3s está corriendo? ---
+    - name: "1.1 | Estado del servicio k3s"
+      ansible.builtin.command: systemctl status k3s --no-pager -l
+      register: k3s_status
+      changed_when: false
+      failed_when: false
+
+    # --- 1.2: ¿En qué dirección/puerto escucha el API Server? ---
+    - name: "1.2 | Puertos escuchando (6443)"
+      ansible.builtin.shell: ss -tlnp | grep -E '6443|kube'
+      register: ss_6443
+      changed_when: false
+      failed_when: false
+
+    # --- 1.3: ¿En qué interfaces está el API Server? ---
+    - name: "1.3 | Procesos escuchando en 6443"
+      ansible.builtin.shell: ss -tlnp 'sport = :6443'
+      register: ss_6443_detail
+      changed_when: false
+      failed_when: false
+
+    # --- 1.4: Configuración actual de K3s ---
+    - name: "1.4 | Argumentos con los que K3s arrancó"
+      ansible.builtin.shell: cat /proc/$(pgrep -f 'k3s server')/cmdline 2>/dev/null | tr '\0' ' ' || echo "k3s server no encontrado"
+      register: k3s_cmdline
+      changed_when: false
+      failed_when: false
+
+    # --- 1.5: Config file de K3s ---
+    - name: "1.5 | Archivo de config de K3s (si existe)"
+      ansible.builtin.shell: cat /etc/rancher/k3s/config.yaml 2>/dev/null || echo "No existe /etc/rancher/k3s/config.yaml"
+      register: k3s_config
+      changed_when: false
+      failed_when: false
+
+    # --- 1.6: Interfaces de red ---
+    - name: "1.6 | Interfaces de red activas"
+      ansible.builtin.shell: ip -4 addr show | grep -E 'inet |^[0-9]'
+      register: ip_addr
+      changed_when: false
+
+    # --- 1.7: UFW Status ---
+    - name: "1.7 | Estado completo de UFW"
+      ansible.builtin.shell: ufw status verbose
+      register: ufw_status
+      changed_when: false
+      failed_when: false
+
+    # --- 1.8: iptables NAT (kube-proxy) ---
+    - name: "1.8 | Reglas iptables NAT (KUBE-SERVICES para 6443)"
+      ansible.builtin.shell: iptables -t nat -L KUBE-SERVICES -n 2>/dev/null | grep -i 6443 || echo "No hay reglas NAT para 6443"
+      register: iptables_nat_6443
+      changed_when: false
+      failed_when: false
+
+    # --- 1.9: iptables FORWARD ---
+    - name: "1.9 | Reglas iptables FORWARD (primeras 30)"
+      ansible.builtin.shell: iptables -L FORWARD -n --line-numbers 2>/dev/null | head -30
+      register: iptables_forward
+      changed_when: false
+      failed_when: false
+
+    # --- 1.10: iptables INPUT para 6443 ---
+    - name: "1.10 | Reglas iptables INPUT que afectan 6443"
+      ansible.builtin.shell: iptables -L INPUT -n -v --line-numbers 2>/dev/null | grep -E '6443|REJECT|DROP|ufw' | head -20
+      register: iptables_input_6443
+      changed_when: false
+      failed_when: false
+
+    # --- 1.11: iptables completas UFW ---
+    - name: "1.11 | Cadenas UFW en iptables (resumen)"
+      ansible.builtin.shell: iptables -L ufw-user-input -n -v 2>/dev/null | head -30 || echo "No existe cadena ufw-user-input"
+      register: iptables_ufw
+      changed_when: false
+      failed_when: false
+
+    # --- 1.12: Estado de nodos K8s ---
+    - name: "1.12 | kubectl get nodes"
+      ansible.builtin.command: kubectl get nodes -o wide
+      register: kubectl_nodes
+      changed_when: false
+      failed_when: false
+      become: false
+
+    # --- 1.13: Pods del sistema ---
+    - name: "1.13 | Pods del sistema (kube-system)"
+      ansible.builtin.command: kubectl get pods -n kube-system -o wide
+      register: kubectl_system_pods
+      changed_when: false
+      failed_when: false
+      become: false
+
+    # --- 1.14: Services de kubernetes ---
+    - name: "1.14 | Kubernetes API Service"
+      ansible.builtin.command: kubectl get svc kubernetes -o wide
+      register: kubectl_api_svc
+      changed_when: false
+      failed_when: false
+      become: false
+
+    # --- 1.15: Endpoints del API Server ---
+    - name: "1.15 | Endpoints del API Server"
+      ansible.builtin.command: kubectl get endpoints kubernetes -o yaml
+      register: kubectl_endpoints
+      changed_when: false
+      failed_when: false
+      become: false
+
+    # --- 1.16: Conectividad local al API ---
+    - name: "1.16 | Conectividad local a 127.0.0.1:6443"
+      ansible.builtin.shell: "curl -sk https://127.0.0.1:6443/version 2>&1 | head -5"
+      register: curl_localhost
+      changed_when: false
+      failed_when: false
+
+    # --- 1.17: Conectividad desde IP física ---
+    - name: "1.17 | Conectividad a {{ nd1_ip }}:6443 desde el master"
+      ansible.builtin.shell: "curl -sk https://{{ nd1_ip }}:6443/version 2>&1 | head -5"
+      register: curl_physical
+      changed_when: false
+      failed_when: false
+
+    # --- 1.18: Conectividad desde ClusterIP ---
+    - name: "1.18 | Conectividad a 172.21.0.1:443 desde el master"
+      ansible.builtin.shell: "curl -sk --connect-timeout 3 https://172.21.0.1:443/version 2>&1 | head -5"
+      register: curl_clusterip
+      changed_when: false
+      failed_when: false
+
+    # --- 1.19: Verificar ServiceAccount spark-editor ---
+    - name: "1.19 | ServiceAccount spark-editor"
+      ansible.builtin.command: kubectl get sa spark-editor -n jupyter -o yaml
+      register: kubectl_sa
+      changed_when: false
+      failed_when: false
+      become: false
+
+    # --- 1.20: Reglas RBAC de spark ---
+    - name: "1.20 | RoleBinding de spark-editor"
+      ansible.builtin.command: kubectl get rolebinding spark-editor-binding -n jupyter -o yaml
+      register: kubectl_rb
+      changed_when: false
+      failed_when: false
+      become: false
+
+    # === GENERAR REPORTE DEL MASTER ===
+    - name: "Reporte Master"
+      ansible.builtin.debug:
+        msg: |
+
+          ╔══════════════════════════════════════════════════════════════════════╗
+          ║          DIAGNÓSTICO SPARK INFRAESTRUCTURA — MASTER (nd-1)          ║
+          ╚══════════════════════════════════════════════════════════════════════╝
+
+          ┌─ 1.1 Estado del servicio k3s ──────────────────────────────────────┐
+          {{ k3s_status.stdout | default('(vacío)') }}
+          └────────────────────────────────────────────────────────────────────┘
+
+          ┌─ 1.2 Puertos escuchando (6443) ────────────────────────────────────┐
+          {{ ss_6443.stdout | default('(vacío)') }}
+          └────────────────────────────────────────────────────────────────────┘
+
+          ┌─ 1.3 Detalle socket 6443 ──────────────────────────────────────────┐
+          {{ ss_6443_detail.stdout | default('(vacío)') }}
+          └────────────────────────────────────────────────────────────────────┘
+
+          ┌─ 1.4 Argumentos de arranque de K3s ────────────────────────────────┐
+          {{ k3s_cmdline.stdout | default('(vacío)') }}
+          └────────────────────────────────────────────────────────────────────┘
+
+          ┌─ 1.5 Config de K3s (/etc/rancher/k3s/config.yaml) ────────────────┐
+          {{ k3s_config.stdout | default('(vacío)') }}
+          └────────────────────────────────────────────────────────────────────┘
+
+          ┌─ 1.6 Interfaces de red ────────────────────────────────────────────┐
+          {{ ip_addr.stdout | default('(vacío)') }}
+          └────────────────────────────────────────────────────────────────────┘
+
+          ┌─ 1.7 UFW Status ───────────────────────────────────────────────────┐
+          {{ ufw_status.stdout | default('(vacío)') }}
+          └────────────────────────────────────────────────────────────────────┘
+
+          ┌─ 1.8 iptables NAT para 6443 ───────────────────────────────────────┐
+          {{ iptables_nat_6443.stdout | default('(vacío)') }}
+          └────────────────────────────────────────────────────────────────────┘
+
+          ┌─ 1.9 iptables FORWARD ─────────────────────────────────────────────┐
+          {{ iptables_forward.stdout | default('(vacío)') }}
+          └────────────────────────────────────────────────────────────────────┘
+
+          ┌─ 1.10 iptables INPUT para 6443 ────────────────────────────────────┐
+          {{ iptables_input_6443.stdout | default('(vacío)') }}
+          └────────────────────────────────────────────────────────────────────┘
+
+          ┌─ 1.11 Cadenas UFW en iptables ─────────────────────────────────────┐
+          {{ iptables_ufw.stdout | default('(vacío)') }}
+          └────────────────────────────────────────────────────────────────────┘
+
+          ┌─ 1.12 Nodos del clúster ───────────────────────────────────────────┐
+          {{ kubectl_nodes.stdout | default('(vacío)') }}
+          └────────────────────────────────────────────────────────────────────┘
+
+          ┌─ 1.13 Pods kube-system ────────────────────────────────────────────┐
+          {{ kubectl_system_pods.stdout | default('(vacío)') }}
+          └────────────────────────────────────────────────────────────────────┘
+
+          ┌─ 1.14 Servicio kubernetes ─────────────────────────────────────────┐
+          {{ kubectl_api_svc.stdout | default('(vacío)') }}
+          └────────────────────────────────────────────────────────────────────┘
+
+          ┌─ 1.15 Endpoints del API Server ────────────────────────────────────┐
+          {{ kubectl_endpoints.stdout | default('(vacío)') }}
+          └────────────────────────────────────────────────────────────────────┘
+
+          ┌─ 1.16 curl localhost:6443 ─────────────────────────────────────────┐
+          {{ curl_localhost.stdout | default('(vacío)') }}
+          └────────────────────────────────────────────────────────────────────┘
+
+          ┌─ 1.17 curl {{ nd1_ip }}:6443 ──────────────────────────────────────┐
+          {{ curl_physical.stdout | default('(vacío)') }}
+          └────────────────────────────────────────────────────────────────────┘
+
+          ┌─ 1.18 curl 172.21.0.1:443 ─────────────────────────────────────────┐
+          {{ curl_clusterip.stdout | default('(vacío)') }}
+          └────────────────────────────────────────────────────────────────────┘
+
+          ┌─ 1.19 ServiceAccount spark-editor ─────────────────────────────────┐
+          {{ kubectl_sa.stdout | default('(vacío)') }}
+          └────────────────────────────────────────────────────────────────────┘
+
+          ┌─ 1.20 RoleBinding spark-editor ────────────────────────────────────┐
+          {{ kubectl_rb.stdout | default('(vacío)') }}
+          └────────────────────────────────────────────────────────────────────┘
+
+# =============================================================================
+# FASE 2: DIAGNÓSTICO DESDE LOS WORKERS
+# =============================================================================
+- name: "DIAG FASE 2 | Conectividad desde Workers hacia API Server"
+  hosts: workers
+  become: true
+  tasks:
+    # --- 2.1: Estado del agente K3s ---
+    - name: "2.1 | Estado del servicio k3s-agent"
+      ansible.builtin.command: systemctl status k3s-agent --no-pager -l
+      register: k3s_agent_status
+      changed_when: false
+      failed_when: false
+
+    # --- 2.2: Interfaces de red ---
+    - name: "2.2 | Interfaces de red activas"
+      ansible.builtin.shell: ip -4 addr show | grep -E 'inet |^[0-9]'
+      register: worker_ip_addr
+      changed_when: false
+
+    # --- 2.3: Rutas ---
+    - name: "2.3 | Tabla de rutas"
+      ansible.builtin.shell: ip route show | head -20
+      register: worker_routes
+      changed_when: false
+
+    # --- 2.4: Conectividad TCP al master (IP física) ---
+    - name: "2.4 | TCP a {{ nd1_ip }}:6443 desde worker"
+      ansible.builtin.shell: "timeout 3 bash -c 'echo > /dev/tcp/{{ nd1_ip }}/6443' 2>&1 && echo 'CONECTADO' || echo 'FALLO'"
+      register: tcp_physical
+      changed_when: false
+      failed_when: false
+
+    # --- 2.5: Conectividad TCP al ClusterIP ---
+    - name: "2.5 | TCP a 172.21.0.1:443 desde worker"
+      ansible.builtin.shell: "timeout 3 bash -c 'echo > /dev/tcp/172.21.0.1/443' 2>&1 && echo 'CONECTADO' || echo 'FALLO'"
+      register: tcp_clusterip
+      changed_when: false
+      failed_when: false
+
+    # --- 2.6: curl al API server ---
+    - name: "2.6 | curl a {{ nd1_ip }}:6443 desde worker"
+      ansible.builtin.shell: "curl -sk --connect-timeout 3 https://{{ nd1_ip }}:6443/version 2>&1 | head -5"
+      register: curl_master
+      changed_when: false
+      failed_when: false
+
+    # --- 2.7: iptables NAT en worker ---
+    - name: "2.7 | iptables NAT KUBE-SERVICES (6443)"
+      ansible.builtin.shell: iptables -t nat -L KUBE-SERVICES -n 2>/dev/null | grep -i 6443 || echo "Sin reglas NAT para 6443"
+      register: worker_iptables_nat
+      changed_when: false
+      failed_when: false
+
+    # --- 2.8: UFW en worker ---
+    - name: "2.8 | UFW status en worker"
+      ansible.builtin.shell: ufw status verbose
+      register: worker_ufw
+      changed_when: false
+      failed_when: false
+
+    # --- 2.9: Flannel interface ---
+    - name: "2.9 | Estado interfaz Flannel (flannel.1)"
+      ansible.builtin.shell: ip -d link show flannel.1 2>/dev/null || echo "flannel.1 no existe"
+      register: flannel_iface
+      changed_when: false
+      failed_when: false
+
+    # --- 2.10: cni0 bridge ---
+    - name: "2.10 | Estado interfaz cni0"
+      ansible.builtin.shell: ip -4 addr show cni0 2>/dev/null || echo "cni0 no existe"
+      register: cni0_iface
+      changed_when: false
+      failed_when: false
+
+    # --- 2.11: Pods corriendo en este nodo ---
+    - name: "2.11 | Contenedores activos en este worker"
+      ansible.builtin.shell: crictl ps 2>/dev/null | head -15 || echo "crictl no disponible"
+      register: crictl_ps
+      changed_when: false
+      failed_when: false
+
+    # --- 2.12: Logs recientes de k3s-agent ---
+    - name: "2.12 | Últimas 15 líneas del log de k3s-agent"
+      ansible.builtin.shell: journalctl -u k3s-agent --no-pager -n 15 2>/dev/null
+      register: k3s_agent_log
+      changed_when: false
+      failed_when: false
+
+    # --- 2.13: Simular conexión desde namespace de red de un pod ---
+    - name: "2.13 | Pods de jupyter corriendo en este nodo"
+      ansible.builtin.shell: crictl ps 2>/dev/null | grep -i 'spark\|jupyter\|notebook' || echo "No hay pods jupyter en este nodo"
+      register: jupyter_pods_here
+      changed_when: false
+      failed_when: false
+
+    # === GENERAR REPORTE DEL WORKER ===
+    - name: "Reporte Worker {{ inventory_hostname }}"
+      ansible.builtin.debug:
+        msg: |
+
+          ╔══════════════════════════════════════════════════════════════════════╗
+          ║    DIAGNÓSTICO SPARK INFRAESTRUCTURA — {{ inventory_hostname }}
+          ╚══════════════════════════════════════════════════════════════════════╝
+
+          ┌─ 2.1 Estado k3s-agent ─────────────────────────────────────────────┐
+          {{ k3s_agent_status.stdout | default('(vacío)') }}
+          └────────────────────────────────────────────────────────────────────┘
+
+          ┌─ 2.2 Interfaces de red ────────────────────────────────────────────┐
+          {{ worker_ip_addr.stdout | default('(vacío)') }}
+          └────────────────────────────────────────────────────────────────────┘
+
+          ┌─ 2.3 Tabla de rutas ───────────────────────────────────────────────┐
+          {{ worker_routes.stdout | default('(vacío)') }}
+          └────────────────────────────────────────────────────────────────────┘
+
+          ┌─ 2.4 TCP {{ nd1_ip }}:6443 ────────────────────────────────────────┐
+          {{ tcp_physical.stdout | default('(vacío)') }}
+          └────────────────────────────────────────────────────────────────────┘
+
+          ┌─ 2.5 TCP 172.21.0.1:443 ───────────────────────────────────────────┐
+          {{ tcp_clusterip.stdout | default('(vacío)') }}
+          └────────────────────────────────────────────────────────────────────┘
+
+          ┌─ 2.6 curl {{ nd1_ip }}:6443 ───────────────────────────────────────┐
+          {{ curl_master.stdout | default('(vacío)') }}
+          └────────────────────────────────────────────────────────────────────┘
+
+          ┌─ 2.7 iptables NAT KUBE-SERVICES ───────────────────────────────────┐
+          {{ worker_iptables_nat.stdout | default('(vacío)') }}
+          └────────────────────────────────────────────────────────────────────┘
+
+          ┌─ 2.8 UFW status ───────────────────────────────────────────────────┐
+          {{ worker_ufw.stdout | default('(vacío)') }}
+          └────────────────────────────────────────────────────────────────────┘
+
+          ┌─ 2.9 Flannel interface ────────────────────────────────────────────┐
+          {{ flannel_iface.stdout | default('(vacío)') }}
+          └────────────────────────────────────────────────────────────────────┘
+
+          ┌─ 2.10 cni0 interface ──────────────────────────────────────────────┐
+          {{ cni0_iface.stdout | default('(vacío)') }}
+          └────────────────────────────────────────────────────────────────────┘
+
+          ┌─ 2.11 Contenedores activos ────────────────────────────────────────┐
+          {{ crictl_ps.stdout | default('(vacío)') }}
+          └────────────────────────────────────────────────────────────────────┘
+
+          ┌─ 2.12 Log k3s-agent (últimas 15 líneas) ──────────────────────────┐
+          {{ k3s_agent_log.stdout | default('(vacío)') }}
+          └────────────────────────────────────────────────────────────────────┘
+
+          ┌─ 2.13 Pods jupyter en este nodo ───────────────────────────────────┐
+          {{ jupyter_pods_here.stdout | default('(vacío)') }}
+          └────────────────────────────────────────────────────────────────────┘

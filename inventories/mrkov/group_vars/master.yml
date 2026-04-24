@@ -4,8 +4,8 @@
 # Variables específicas del nodo master (nd-1): Control Plane k3s + servidor NFS.
 # =============================================================================
 
-# --- PyrateLabs.k3s role ---
-# Documentación: https://github.com/PyrateLabs/ansible-role-k3s
+# --- xanmanning.k3s role ---
+# Documentación: https://github.com/xanmanning/ansible-role-k3s
 k3s_control_node: true
 k3s_server:
   node-ip:              "{{ ansible_host }}"

@@ -128,6 +128,36 @@
         proto: tcp
         src: "{{ network_segment }}"
 
+    # --- Reglas de reenvío (FORWARD/routed) para tráfico de pods ---
+    # UFW por defecto deniega tráfico reenviado ("deny routed").
+    # Los pods necesitan que sus paquetes sean reenviados (FORWARD) por el
+    # nodo worker hacia otros nodos (ej. API Server). Sin estas reglas,
+    # Spark no puede conectarse al clúster K8s desde dentro de un pod.
+    - name: "UFW | Permitir reenvío DESDE red de Pods (route allow)"
+      ansible.builtin.command: ufw route allow from {{ k3s_cluster_cidr }}
+      register: _ufw_route_pods_from
+      changed_when: "'Rule added' in _ufw_route_pods_from.stdout"
+
+    - name: "UFW | Permitir reenvío HACIA red de Pods (route allow)"
+      ansible.builtin.command: ufw route allow to {{ k3s_cluster_cidr }}
+      register: _ufw_route_pods_to
+      changed_when: "'Rule added' in _ufw_route_pods_to.stdout"
+
+    - name: "UFW | Permitir reenvío DESDE red de Services (route allow)"
+      ansible.builtin.command: ufw route allow from {{ k3s_service_cidr }}
+      register: _ufw_route_svc_from
+      changed_when: "'Rule added' in _ufw_route_svc_from.stdout"
+
+    - name: "UFW | Permitir reenvío HACIA red de Services (route allow)"
+      ansible.builtin.command: ufw route allow to {{ k3s_service_cidr }}
+      register: _ufw_route_svc_to
+      changed_when: "'Rule added' in _ufw_route_svc_to.stdout"
+
+    - name: "UFW | Permitir reenvío de Pods hacia red física del clúster"
+      ansible.builtin.command: ufw route allow from {{ k3s_cluster_cidr }} to {{ network_segment }}
+      register: _ufw_route_pods_phys
+      changed_when: "'Rule added' in _ufw_route_pods_phys.stdout"
+
     - name: "UFW | Habilitar firewall"
       community.general.ufw:
         state: enabled

@@ -37,6 +37,20 @@ singleuser:
         - ReadWriteOnce
     homeMountPath: /home/jovyan
 
+  # ---------------------------------------------------------------------------
+  # NetworkPolicy — Spark on K8s requiere:
+  #   1. Egress a IPs privadas (API Server, NFS, comunicación inter-pod)
+  #   2. Ingress desde executor pods (para que conecten de vuelta al driver)
+  # ---------------------------------------------------------------------------
+  networkPolicy:
+    egressAllowRules:
+      privateIPs: true
+    ingress:
+      - from:
+          - podSelector:
+              matchLabels:
+                spark-role: executor
+
   profileList:
     # --------------------------------------------------------------------------
     # 1. PERFIL INVITADO — efímero, sin almacenamiento persistente
@@ -97,8 +111,9 @@ singleuser:
                 - /bin/bash
                 - -c
                 - |
+                  POD_IP=$(hostname -I | awk '{print $1}')
                   mkdir -p /home/jovyan/.spark_conf
-                  cat > /home/jovyan/.spark_conf/spark-defaults.conf << 'SPARKEOF'
+                  cat > /home/jovyan/.spark_conf/spark-defaults.conf << SPARKEOF
                   spark.master                                    k8s://https://kubernetes.default.svc:443
                   spark.kubernetes.container.image                quay.io/jupyter/all-spark-notebook:{{ spark_image_tag }}
                   spark.kubernetes.namespace                      {{ jupyterhub_namespace }}
@@ -106,8 +121,20 @@ singleuser:
                   spark.executor.instances                        {{ spark_executor_instances }}
                   spark.executor.cores                            {{ spark_executor_cores }}
                   spark.executor.memory                           {{ spark_executor_memory }}
-                  spark.driver.host                               ${HOSTNAME}.jupyter.{{ jupyterhub_namespace }}.svc.cluster.local
+                  spark.kubernetes.executor.podTemplateFile       /home/jovyan/.spark_conf/executor-pod-template.yaml
+                  spark.driver.host                               ${POD_IP}
+                  spark.driver.bindAddress                        0.0.0.0
+                  spark.driver.port                               7077
+                  spark.blockManager.port                         7078
                   SPARKEOF
+                  cat > /home/jovyan/.spark_conf/executor-pod-template.yaml << 'PODEOF'
+                  apiVersion: v1
+                  kind: Pod
+                  spec:
+                    containers:
+                    - name: spark-kubernetes-executor
+                      command: ["/bin/bash", "-c", "exec /usr/local/spark/bin/spark-class org.apache.spark.executor.CoarseGrainedExecutorBackend --driver-url $SPARK_DRIVER_URL --executor-id $SPARK_EXECUTOR_ID --cores $SPARK_EXECUTOR_CORES --app-id $SPARK_APPLICATION_ID --hostname $SPARK_EXECUTOR_POD_IP --resourceProfileId $SPARK_RESOURCE_PROFILE_ID"]
+                  PODEOF
         volumes:
           - name: nfs-clases
             nfs: { server: {{ nd1_ip }}, path: {{ nfs_base_path }}/clases }
@@ -148,8 +175,9 @@ singleuser:
                 - /bin/bash
                 - -c
                 - |
+                  POD_IP=$(hostname -I | awk '{print $1}')
                   mkdir -p /home/jovyan/.spark_conf
-                  cat > /home/jovyan/.spark_conf/spark-defaults.conf << 'SPARKEOF'
+                  cat > /home/jovyan/.spark_conf/spark-defaults.conf << SPARKEOF
                   spark.master                                    k8s://https://kubernetes.default.svc:443
                   spark.kubernetes.container.image                quay.io/jupyter/all-spark-notebook:{{ spark_image_tag }}
                   spark.kubernetes.namespace                      {{ jupyterhub_namespace }}
@@ -157,8 +185,20 @@ singleuser:
                   spark.executor.instances                        {{ spark_executor_instances }}
                   spark.executor.cores                            {{ spark_executor_cores }}
                   spark.executor.memory                           {{ spark_executor_memory }}
-                  spark.driver.host                               ${HOSTNAME}.jupyter.{{ jupyterhub_namespace }}.svc.cluster.local
+                  spark.kubernetes.executor.podTemplateFile       /home/jovyan/.spark_conf/executor-pod-template.yaml
+                  spark.driver.host                               ${POD_IP}
+                  spark.driver.bindAddress                        0.0.0.0
+                  spark.driver.port                               7077
+                  spark.blockManager.port                         7078
                   SPARKEOF
+                  cat > /home/jovyan/.spark_conf/executor-pod-template.yaml << 'PODEOF'
+                  apiVersion: v1
+                  kind: Pod
+                  spec:
+                    containers:
+                    - name: spark-kubernetes-executor
+                      command: ["/bin/bash", "-c", "exec /usr/local/spark/bin/spark-class org.apache.spark.executor.CoarseGrainedExecutorBackend --driver-url $SPARK_DRIVER_URL --executor-id $SPARK_EXECUTOR_ID --cores $SPARK_EXECUTOR_CORES --app-id $SPARK_APPLICATION_ID --hostname $SPARK_EXECUTOR_POD_IP --resourceProfileId $SPARK_RESOURCE_PROFILE_ID"]
+                  PODEOF
         volumes:
           - name: nfs-clases
             nfs: { server: {{ nd1_ip }}, path: {{ nfs_base_path }}/clases }
@@ -200,8 +240,9 @@ singleuser:
                 - /bin/bash
                 - -c
                 - |
+                  POD_IP=$(hostname -I | awk '{print $1}')
                   mkdir -p /home/jovyan/.spark_conf
-                  cat > /home/jovyan/.spark_conf/spark-defaults.conf << 'SPARKEOF'
+                  cat > /home/jovyan/.spark_conf/spark-defaults.conf << SPARKEOF
                   spark.master                                    k8s://https://kubernetes.default.svc:443
                   spark.kubernetes.container.image                quay.io/jupyter/all-spark-notebook:{{ spark_image_tag }}
                   spark.kubernetes.namespace                      {{ jupyterhub_namespace }}
@@ -209,8 +250,20 @@ singleuser:
                   spark.executor.instances                        {{ spark_executor_instances }}
                   spark.executor.cores                            {{ spark_executor_cores }}
                   spark.executor.memory                           {{ spark_executor_memory }}
-                  spark.driver.host                               ${HOSTNAME}.jupyter.{{ jupyterhub_namespace }}.svc.cluster.local
+                  spark.kubernetes.executor.podTemplateFile       /home/jovyan/.spark_conf/executor-pod-template.yaml
+                  spark.driver.host                               ${POD_IP}
+                  spark.driver.bindAddress                        0.0.0.0
+                  spark.driver.port                               7077
+                  spark.blockManager.port                         7078
                   SPARKEOF
+                  cat > /home/jovyan/.spark_conf/executor-pod-template.yaml << 'PODEOF'
+                  apiVersion: v1
+                  kind: Pod
+                  spec:
+                    containers:
+                    - name: spark-kubernetes-executor
+                      command: ["/bin/bash", "-c", "exec /usr/local/spark/bin/spark-class org.apache.spark.executor.CoarseGrainedExecutorBackend --driver-url $SPARK_DRIVER_URL --executor-id $SPARK_EXECUTOR_ID --cores $SPARK_EXECUTOR_CORES --app-id $SPARK_APPLICATION_ID --hostname $SPARK_EXECUTOR_POD_IP --resourceProfileId $SPARK_RESOURCE_PROFILE_ID"]
+                  PODEOF
         volumes:
           - name: nfs-clases
             nfs: { server: {{ nd1_ip }}, path: {{ nfs_base_path }}/clases }

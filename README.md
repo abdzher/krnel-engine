@@ -121,3 +121,24 @@ kubectl get secret --namespace monitoring mrkovmonitor-grafana -o jsonpath="{.da
 ```
 
 Utiliza el usuario `admin` y la contraseña obtenida en el paso anterior para acceder a la interfaz web de Grafana en la dirección: http://<node_ip>:<victoria_metrics_port>
+
+
+### Acceso a JupyterHub
+
+Para acceder a JupyterHub, primero debes registrar el usuario administrador con el usuario y contraseña definida en las variables globales. Posteriormente solo inicia sesión.
+
+
+### Bugs conocidos
+
+* [Crítico] PVC no consistente: El almacenamiento persistente no funciona correctamente. 
+* [Crítico] Spark no inicia: Los pods de Spark no se inician correctamente, parece ser un problema con la red interna del clúster.
+
+### Futuras implementaciones
+
+* [ ] Añadir playbooks de prueba para verificar la instalación.
+* [ ] Mejores Notebooks de ejemplo para el repositorio.
+* [ ] Migración de SQlite a PostgreSQL para la base de datos de JupyterHub.
+* [ ] Implementar PostgreSQL como servicio del clúster para los usuarios.
+* [ ] Implementar resiliencia en caso de apagones.
+* [ ] Implementar copias de seguridad automáticas.
+* [ ] Añadir soporte para GPU.
