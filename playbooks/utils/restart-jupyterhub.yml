@@ -1,0 +1,24 @@
+---
+- name: Restart JupyterHub Pods
+  hosts: master
+  become: false
+  tasks:
+    - name: Delete proxy pod
+      kubernetes.core.k8s:
+        kubeconfig: "{{ k8s_kubeconfig }}"
+        state: absent
+        api_version: v1
+        kind: Pod
+        namespace: jupyter
+        label_selectors:
+          - component=proxy
+
+    - name: Delete hub pod
+      kubernetes.core.k8s:
+        kubeconfig: "{{ k8s_kubeconfig }}"
+        state: absent
+        api_version: v1
+        kind: Pod
+        namespace: jupyter
+        label_selectors:
+          - component=hub

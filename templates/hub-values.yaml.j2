@@ -17,6 +17,7 @@ singleuser:
     LANG: "C.UTF-8"
     LANGUAGE: "C.UTF-8"
     LC_ALL: "C.UTF-8"
+    SPARK_CONF_DIR: "/home/jovyan/.spark_conf"
 
   cpu:
     limit: 1
@@ -96,10 +97,10 @@ singleuser:
                 - /bin/bash
                 - -c
                 - |
-                  mkdir -p "$SPARK_HOME/conf"
-                  cat > "$SPARK_HOME/conf/spark-defaults.conf" << 'SPARKEOF'
+                  mkdir -p /home/jovyan/.spark_conf
+                  cat > /home/jovyan/.spark_conf/spark-defaults.conf << 'SPARKEOF'
                   spark.master                                    k8s://https://kubernetes.default.svc:443
-                  spark.kubernetes.container.image                jupyter/all-spark-notebook:{{ spark_image_tag }}
+                  spark.kubernetes.container.image                quay.io/jupyter/all-spark-notebook:{{ spark_image_tag }}
                   spark.kubernetes.namespace                      {{ jupyterhub_namespace }}
                   spark.kubernetes.authenticate.serviceAccountName spark-editor
                   spark.executor.instances                        {{ spark_executor_instances }}
@@ -147,10 +148,10 @@ singleuser:
                 - /bin/bash
                 - -c
                 - |
-                  mkdir -p "$SPARK_HOME/conf"
-                  cat > "$SPARK_HOME/conf/spark-defaults.conf" << 'SPARKEOF'
+                  mkdir -p /home/jovyan/.spark_conf
+                  cat > /home/jovyan/.spark_conf/spark-defaults.conf << 'SPARKEOF'
                   spark.master                                    k8s://https://kubernetes.default.svc:443
-                  spark.kubernetes.container.image                jupyter/all-spark-notebook:{{ spark_image_tag }}
+                  spark.kubernetes.container.image                quay.io/jupyter/all-spark-notebook:{{ spark_image_tag }}
                   spark.kubernetes.namespace                      {{ jupyterhub_namespace }}
                   spark.kubernetes.authenticate.serviceAccountName spark-editor
                   spark.executor.instances                        {{ spark_executor_instances }}
@@ -199,10 +200,10 @@ singleuser:
                 - /bin/bash
                 - -c
                 - |
-                  mkdir -p "$SPARK_HOME/conf"
-                  cat > "$SPARK_HOME/conf/spark-defaults.conf" << 'SPARKEOF'
+                  mkdir -p /home/jovyan/.spark_conf
+                  cat > /home/jovyan/.spark_conf/spark-defaults.conf << 'SPARKEOF'
                   spark.master                                    k8s://https://kubernetes.default.svc:443
-                  spark.kubernetes.container.image                jupyter/all-spark-notebook:{{ spark_image_tag }}
+                  spark.kubernetes.container.image                quay.io/jupyter/all-spark-notebook:{{ spark_image_tag }}
                   spark.kubernetes.namespace                      {{ jupyterhub_namespace }}
                   spark.kubernetes.authenticate.serviceAccountName spark-editor
                   spark.executor.instances                        {{ spark_executor_instances }}
@@ -229,6 +230,7 @@ singleuser:
             readOnly: false
 
 hub:
+  baseUrl: /hub/
   config:
     JupyterHub:
       authenticator_class: native
@@ -236,8 +238,6 @@ hub:
         invitados: []
         comunidad: []
         profesores: []
-      bind_url: http://:8081
-      base_url: "/hub/"
     Authenticator:
       admin_users:
         - {{ jupyterhub_admin_user }}

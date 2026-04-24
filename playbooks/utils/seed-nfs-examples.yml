@@ -1,0 +1,41 @@
+---
+# =============================================================================
+# KRNEL — playbooks/utils/seed-nfs-examples.yml
+# Copia archivos de ejemplo preconfigurados a las carpetas NFS compartidas
+# que están montadas en los contenedores de JupyterHub.
+# =============================================================================
+
+- name: "UTIL | Sembrar archivos de ejemplo en directorios NFS"
+  hosts: master
+  become: true
+  tasks:
+    - name: Copiar ejemplos de Comunidad (Lectura/Escritura global)
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../../examples/comunity/"
+        dest: "{{ nfs_base_path }}/comunidad/"
+        owner: nobody
+        group: nogroup
+        mode: "0777"
+        directory_mode: "0777"
+
+    - name: Copiar ejemplos de Clases (Solo lectura para alumnos)
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../../examples/academic/"
+        dest: "{{ nfs_base_path }}/clases/"
+        owner: nobody
+        group: nogroup
+        mode: "0755"
+        directory_mode: "0755"
+
+    - name: Copiar repositorio general (Solo lectura global)
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../../examples/general/"
+        dest: "{{ nfs_base_path }}/repositorio/"
+        owner: nobody
+        group: nogroup
+        mode: "0755"
+        directory_mode: "0755"
+
+    - name: Imprimir confirmación
+      ansible.builtin.debug:
+        msg: "Archivos de ejemplo copiados exitosamente al servidor NFS en {{ nfs_base_path }}"
