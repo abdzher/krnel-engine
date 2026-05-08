@@ -1,185 +1,221 @@
-# KRNEL Engine
 
-KRNEL Engine es la infraestructura basada en Ansible para el despliegue y gestión de un clúster K3s bare-metal con JupyterHub y Apache Spark, dirigido a su uso en el clúster MRKOV (la compatibilidad con otro hardware no está del todo garantizada).
+# KRNEL Engine: Academic PaaS for Distributed Research
 
-## Características
+**KRNEL Engine** is an Infrastructure-as-Code (IaC) framework based on Ansible, designed to deploy and manage a production-ready **bare-metal K3s cluster** featuring JupyterHub and Apache Spark. It is specifically tailored for the **MRKOV Cluster** (compatibility with different hardware architectures is not fully guaranteed).
 
-- Configuración de red mediante ufw.
-- Despliegue automático de nfs server y su motor para storageClasses.
-- Despliegue automático de K3s en múltiples nodos.
-- Despliegue automático de JupyterHub.
-- Despliegue automático de Apache Spark (bajo la imagen de JupyterHub: all-spark).
-- Despliegue automático de Grafana.
-- Despliegue automático de Victoria Metrics.
-- Despliegue automático de Nginx.
+> **Status:** 🛠️ *Active Development - Alpha Stage.* This project focuses on solving the gap between hardware resource management and academic research accessibility.
 
-Dentro del portal de JupyterHub, puedes esperar:
+## 🏛️ Architecture & Features
 
-- Autenticación nativa + filtro por lista blanca (whitelist) de usuarios.
-- Gestión de grupos: invitados (almacenamiento efímero), estudiantes (almacenamiento persistente), profesores (almacenamiento persistente y repositorio para clases en modo escritura) y administrador.
-- Spark preconfigurado para usar los recursos del clúster desde notebooks de JupyterHub.
-- Repositorios para los usuarios en el servidor NFS: carpeta de clases, datasets y una adicional para uso general.
+The automated deployment provisions a full-stack environment, including:
+
+* **Network Security:** Firewall configuration via `ufw`.
+* **Storage:** Automated NFS server deployment and provisioning for `StorageClasses`.
+* **Orchestration:** Multi-node lightweight Kubernetes (**K3s**) deployment.
+* **Data Processing:** **Apache Spark** integration (utilizing the `all-spark` JupyterHub image).
+* **Observability:** Full monitoring stack with **Grafana** and **Victoria Metrics**.
+* **Ingress & Routing:** High-performance routing using **Nginx**.
+
+### 👥 JupyterHub Ecosystem
+
+Within the JupyterHub portal, the platform is pre-configured with:
+
+* **Authentication:** Native auth backed by a user whitelist filter.
+* **Role-Based Access Control (RBAC):**
+* *Guests:* Ephemeral storage.
+* *Students:* Persistent storage.
+* *Professors:* Persistent storage + write-access repository for class materials.
+* *Admin:* Full administrative privileges.
 
 
-## Requisitos Previos
-
-Asegúrate de tener instalado [uv](https://github.com/astral-sh/uv), un gestor de paquetes y entornos de Python extremadamente rápido.
+* **Compute Integration:** Spark pre-configured to utilize cluster resources directly from Jupyter notebooks.
+* **Shared Storage:** NFS-backed user repositories, including folders for classes, datasets, and a general-purpose workspace.
 
 ---
 
-## 1. Preparación del Entorno
+## ⚙️ Prerequisites
 
-Primero, crea tu entorno virtual usando `uv` con la versión recomendada de Python (3.12):
+Ensure you have **[uv](https://github.com/astral-sh/uv)** installed, an extremely fast Python package and environment manager.
+
+---
+
+## 1. Environment Setup
+
+First, create your virtual environment using `uv` with the recommended Python version (3.12):
 
 ```bash
 uv venv --python 3.12
+
 ```
 
-Activa tu entorno virtual (necesario para usar las dependencias locales):
+Activate the virtual environment (required to use local dependencies):
+
 ```bash
 source .venv/bin/activate
+
 ```
 
-Instala Ansible y la librería requerida (netaddr) en tu sistema utilizando las herramientas de `uv`:
+Install Ansible and the required library (`netaddr`) on your system using `uv` tools:
 
 ```bash
 uv tool install ansible-core --with ansible --with netaddr --force
+
 ```
 
-Para asegurarte de que los binarios de Ansible (como `ansible-playbook`, `ansible-galaxy` y `ansible-vault`) estén disponibles en tu `PATH`, ejecuta:
+To ensure Ansible binaries (such as `ansible-playbook`, `ansible-galaxy`, and `ansible-vault`) are available in your `PATH`, run:
 
 ```bash
 uv tool update-shell
+
 ```
 
-*(Nota: Si `uv` te pide reiniciar tu terminal o cargar de nuevo tu configuración de shell, hazlo antes de continuar).*
+*(Note: If `uv` prompts you to restart your terminal or reload your shell configuration, do so before proceeding).*
 
 ---
 
-## 2. Instalación de Dependencias de Ansible
+## 2. Ansible Dependencies Installation
 
-Este proyecto hace uso de colecciones específicas de Ansible. Instálalas usando el archivo de requerimientos:
+This project relies on specific Ansible collections. Install them using the requirements file:
 
 ```bash
-# Instalar dependencias y colecciones de Ansible Galaxy
+# Install dependencies and Ansible Galaxy collections
 ansible-galaxy install -r requirements.yml
 ansible-galaxy collection install -r requirements.yml
+
 ```
 
 ---
 
-## 3. Configuración del Inventario y Variables
+## 3. Inventory and Variables Configuration
 
-Antes de ejecutar cualquier playbook, necesitas configurar las variables de red y opciones de tu clúster.
+Before executing any playbook, you must configure your network variables and cluster options.
 
-1. Navega al directorio de variables globales de tu entorno (ej. `mrkov`):
-   ```bash
-   cd inventories/mrkov/
-   ```
-2. Copia el archivo de ejemplo para crear tu configuración real. (El archivo `all.yml` está protegido en `.gitignore` para que no subas tus IPs o secretos accidentalmente):
-   ```bash
-   cp hosts.example.ini hosts.ini
-   cp group_vars/all.example.yml group_vars/all.yml
-   ```
-3. Edita `all.yml` y reemplaza los valores de ejemplo (como las IPs `X.X.X.X` y los dominios) por los valores reales de tus servidores físicos o máquinas virtuales.
+1. Navigate to your environment's global variables directory (e.g., `mrkov`):
+```bash
+cd inventories/mrkov/
 
----
+```
 
-## 4. Configuración de Secretos con Ansible Vault
 
-Algunas variables en tu archivo `all.yml` son altamente sensibles, como contraseñas de administrador o tokens. NUNCA las escribas en texto plano. Debes cifrarlas usando `ansible-vault`.
-
-1. Genera las credenciales necesarias, por ejemplo, un token seguro de 32 caracteres para JupyterHub:
-   ```bash
-   openssl rand -hex 32
-   ```
-
-2. Cifra los valores sensibles. Ejecuta este comando e ingresa el valor a cifrar:
-   ```bash
-   ansible-vault encrypt_string 'TU_VALOR_SECRETO' --name 'nombre_de_la_variable'
-   ```
-   *(La primera vez que uses ansible-vault te pedirá crear una contraseña maestra para el Vault. ¡Asegúrate de recordarla! La necesitarás al ejecutar los playbooks).*
-
-3. Copia el bloque cifrado resultante (que empieza con `!vault |`) y pégalo dentro de tu archivo `all.yml` en las variables correspondientes (por ejemplo, en `proxy_token` y `jupyterhub_admin_pass`).
-
----
-
-## 5. Ejecución de los Playbooks
-
-Una vez que tu entorno está listo, las variables editadas y los secretos cifrados, puedes proceder a instalar la infraestructura. Vuelve a la raíz del repositorio.
-
-Para aplicar la configuración a tus nodos, ejecuta los playbooks proporcionados, indicando a Ansible el entorno (`-i inventories/mrkov`) y agregando la bandera `--ask-vault-pass` para que Ansible pueda descifrar tus variables sensibles:
+2. Copy the template files to create your actual configuration. (The `all.yml` file is protected in `.gitignore` to prevent accidental commits of IPs or secrets):
 
 ```bash
-# Ejemplo: Instalación base de K3s
-ansible-playbook -i inventories/mrkov playbooks/01-k3s-install.yml --ask-vault-pass --ask-become-pass
+   cp hosts.example.ini hosts.ini
+   cp group_vars/all.example.yml group_vars/all.yml
 
-# Ejemplo: Despliegue de JupyterHub
-ansible-playbook -i inventories/mrkov playbooks/05-jupyterhub.yml --ask-vault-pass --ask-become-pass
 ```
 
-**(Asegúrate de ejecutar los playbooks en el orden numérico correcto según estén nombrados en la carpeta `playbooks/`).**
+3. Edit `all.yml` and replace the placeholder values (such as `X.X.X.X` IPs and domains) with the actual values of your bare-metal servers or VMs.
+
+---
+
+## 4. Secrets Management with Ansible Vault
+
+Certain variables in your `all.yml` file are highly sensitive (e.g., admin passwords or API tokens). NEVER store them in plain text. You must encrypt them using `ansible-vault`.
+
+1. Generate the necessary credentials. For example, a secure 32-character token for JupyterHub:
+```bash
+openssl rand -hex 32
+
+```
 
 
-### Troubleshooting de validación del webhook
+2. Encrypt the sensitive values. Run the following command and input the value to encrypt:
 
-Si al ejecutar el playbook de monitoreo recibes errores de validación de webhook (por ejemplo: "Admission webhook 'victoria-metrics-operator.default.svc' rejected the request"), es necesario eliminar el recurso huérfano antes de volver a ejecutar el playbook.
+```bash
+   ansible-vault encrypt_string 'YOUR_SECRET_VALUE' --name 'variable_name'
 
-Ejecuta el siguiente comando para limpiar los webhooks:
+```
+
+*(The first time you use ansible-vault, it will prompt you to create a master password. Make sure to remember it, as you will need it to run the playbooks).*
+
+3. Copy the resulting encrypted block (starting with `!vault |`) and paste it into your `all.yml` file under the corresponding variables (e.g., `proxy_token` and `jupyterhub_admin_pass`).
+
+---
+
+## 5. Playbook Execution
+
+Once your environment is set up, variables edited, and secrets encrypted, you can proceed to provision the infrastructure. Return to the root of the repository.
+
+To apply the configuration to your nodes, execute the provided playbooks, pointing Ansible to the correct environment (`-i inventories/mrkov`) and adding the `--ask-vault-pass` flag to decrypt your sensitive variables:
+
+```bash
+# Example: K3s Base Installation
+ansible-playbook -i inventories/mrkov playbooks/01-k3s-install.yml --ask-vault-pass --ask-become-pass
+
+# Example: JupyterHub Deployment
+ansible-playbook -i inventories/mrkov playbooks/05-jupyterhub.yml --ask-vault-pass --ask-become-pass
+
+```
+
+**(Ensure you execute the playbooks in the correct numerical order as named in the `playbooks/` directory).**
+
+---
+
+## 🔧 Operations & Troubleshooting
+
+### Webhook Validation Errors
+
+If you receive webhook validation errors during the monitoring playbook execution (e.g., *"Admission webhook 'victoria-metrics-operator.default.svc' rejected the request"*), you must remove the orphaned resource before re-running the playbook:
 
 ```bash
 ansible-playbook -i inventories/mrkov playbooks/utils/uninstall-monitoring.yml -K
+
 ```
 
-### Acceso a Grafana
+### Accessing Grafana
 
-Para acceder a Grafana, primero debes obtener la contraseña del usuario por defecto `admin`:
+To access Grafana dashboards, retrieve the default `admin` password:
 
 ```bash
 kubectl get secret --namespace monitoring mrkovmonitor-grafana -o jsonpath="{.data.admin-password}" | base64 --decode ; echo
+
 ```
 
-Utiliza el usuario `admin` y la contraseña obtenida en el paso anterior para acceder a la interfaz web de Grafana en la dirección: http://<node_ip>:<victoria_metrics_port>
+Log in using the `admin` user and the retrieved password at: `http://<node_ip>:<victoria_metrics_port>`
 
+### Accessing JupyterHub
 
-### Acceso a JupyterHub
+Before general use, log in with the administrator credentials defined in your global variables to initialize the system. Afterward, standard login procedures apply.
 
-Para acceder a JupyterHub, primero debes registrar el usuario administrador con el usuario y contraseña definida en las variables globales. Posteriormente solo inicia sesión.
+### Utilities
 
-
-### Utilidades
-
-Se agregaron playbooks de utilidades en la carpeta `playbooks/utils`. Puede ejecutarlos de manera similar a los playbooks principales:
+Utility playbooks are located in the `playbooks/utils` directory and can be executed similarly to main playbooks:
 
 ```bash
-#Reiniciar JupyterHub
+# Restart JupyterHub Services
 ansible-playbook -i inventories/mrkov playbooks/utils/restart-jupyterhub.yml --ask-become-pass --ask-vault-pass
+
 ```
 
+---
 
+## 🧪 Current Engineering Challenges (Known Issues)
 
-### Bugs conocidos
+As an active project, we are currently addressing the following bottlenecks:
 
-* [ ] PVC no consistente: El almacenamiento persistente no funciona correctamente. ¡Crítico! 
-* [ ] Pérdida de usuarios: Los usuarios pierden el acceso a JupyterHub después de un tiempo. ¡Crítico!
-* [ ] Spark no consistente: Inicia pero puede tener errores al solicitar más recursos de los predeterminados. 
+* [ ] **Storage Consistency:** Resolving intermittent persistent storage (PVC) operational inconsistencies.
+* [ ] **Session Persistence:** Addressing user access drops in JupyterHub over extended periods.
+* [ ] **Spark Resource Allocation:** Stabilizing dynamic resource requests for Spark executors beyond default limits.
 
-### Futuras implementaciones
+---
 
-* [ ] Añadir componentes para la identidad de los usuarios (comando personalizado krnel y template para JupyterHub)
-* [ ] Implementar resiliencia en caso de apagones.
-* [ ] Implementar copias de seguridad automáticas.
-* [ ] Añadir playbooks de prueba para verificar la instalación.
-* [ ] Mejores Notebooks de ejemplo para el repositorio.
-* [ ] Migración de SQlite a PostgreSQL para la base de datos de JupyterHub.
-* [ ] Implementar PostgreSQL como servicio del clúster para los usuarios.
-* [ ] Implementar MinIO en el clúster para almacenamiento de datos.
-* [ ] Implementar el uso de una rama para pruebas (develop) antes de subir a producción.
-* [ ] Añadir soporte para GPU.
+## 🗺️ Roadmap & Future Implementations
 
-### Próximos releases
+* [ ] Custom identity components (custom `krnel` command and JupyterHub template).
+* [ ] Implementation of power outage resilience mechanisms.
+* [ ] Automated cluster backup routines.
+* [ ] Ansible testing playbooks for pre-flight validation.
+* [ ] Enhanced example notebooks for the user repository.
+* [ ] Migration from SQLite to **PostgreSQL** for JupyterHub state management.
+* [ ] Deployment of PostgreSQL as an internal cluster service for users.
+* [ ] Integration of **MinIO** for S3-compatible object storage.
+* [ ] Implementation of a strict GitOps workflow (testing on `develop` branch prior to production deployment).
+* [ ] Hardware acceleration integration (**GPU Support**).
 
-* [ ] Versión 0.1.0: Despliegue del stack JupyterHub, Spark y Grafana en un clúster K3s bare-metal (próximo, al arreglar bugs conocidos).
-* [ ] Versión 0.2.0: Añadir componentes para la identidad de los usuarios.
+### 📦 Upcoming Releases
+
+* [ ] **v0.1.0:** Stable deployment of JupyterHub, Spark, and Grafana stack on bare-metal K3s (pending resolution of known issues).
+* [ ] **v0.2.0:** Integration of robust user identity components.
 * ...
-* [ ] Versión 1.0.0: Despliegue completo con todas las funcionalidades básicas y resiliencia a fallos (posterior a pruebas).
+* [ ] **v1.0.0:** Full production deployment featuring core capabilities and fault-tolerance resilience.
