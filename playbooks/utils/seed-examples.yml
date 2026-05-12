@@ -1,0 +1,261 @@
+---
+# =============================================================================
+# KRNEL — playbooks/utils/seed-nfs-examples.yml
+# DEPRECADO el backend NFS: este utilitario ahora siembra los ejemplos en los
+# PVCs compartidos RWX de JupyterHub sobre Longhorn.
+#
+# Copias realizadas:
+#   examples/comunity/  -> PVC {{ jupyter_shared_comunidad_pvc }}
+#   examples/academic/  -> PVC {{ jupyter_shared_clases_pvc }}
+#   examples/general/   -> PVC {{ jupyter_shared_repositorio_pvc }}
+# =============================================================================
+
+- name: "UTIL | Sembrar archivos de ejemplo en PVCs compartidos Longhorn"
+  hosts: master
+  become: false
+  vars:
+    seed_pod_name: krnel-shared-seeder
+    seed_container_name: seeder
+    seed_mount_base: /seed
+    seed_tmp_base: /tmp/krnel-seed
+    seed_remote_base: "/tmp/krnel-seed-examples-{{ ansible_facts['date_time']['epoch'] }}"
+
+  tasks:
+    - name: Verificar que los directorios de ejemplo existen localmente
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      register: seed_example_dirs
+      delegate_to: localhost
+      loop:
+        - "{{ playbook_dir }}/../../examples/comunity"
+        - "{{ playbook_dir }}/../../examples/academic"
+        - "{{ playbook_dir }}/../../examples/general"
+
+    - name: Fallar si falta algún directorio de ejemplo
+      ansible.builtin.fail:
+        msg: "No existe el directorio local requerido: {{ item.item }}"
+      loop: "{{ seed_example_dirs.results }}"
+      when: not item.stat.exists
+
+    - name: Verificar PVCs compartidos de Longhorn
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ k8s_kubeconfig }}"
+        api_version: v1
+        kind: PersistentVolumeClaim
+        namespace: "{{ jupyterhub_namespace }}"
+        name: "{{ item }}"
+      register: seed_pvc_checks
+      loop:
+        - "{{ jupyter_shared_clases_pvc }}"
+        - "{{ jupyter_shared_comunidad_pvc }}"
+        - "{{ jupyter_shared_repositorio_pvc }}"
+
+    - name: Fallar si falta algún PVC compartido
+      ansible.builtin.fail:
+        msg: "No existe el PVC compartido requerido en {{ jupyterhub_namespace }}: {{ item.item }}"
+      loop: "{{ seed_pvc_checks.results }}"
+      when: item.resources | length == 0
+
+    - name: Eliminar pod temporal previo si existe
+      kubernetes.core.k8s:
+        kubeconfig: "{{ k8s_kubeconfig }}"
+        api_version: v1
+        kind: Pod
+        namespace: "{{ jupyterhub_namespace }}"
+        name: "{{ seed_pod_name }}"
+        state: absent
+        wait: true
+        wait_timeout: 120
+
+    - name: Crear staging temporal de ejemplos en el master
+      ansible.builtin.file:
+        path: "{{ seed_remote_base }}/{{ item }}"
+        state: directory
+        mode: "0755"
+      loop:
+        - comunidad
+        - clases
+        - repositorio
+
+    - name: Copiar ejemplos de Comunidad al master
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../../examples/comunity/"
+        dest: "{{ seed_remote_base }}/comunidad/"
+        mode: "0644"
+        directory_mode: "0755"
+
+    - name: Copiar ejemplos de Clases al master
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../../examples/academic/"
+        dest: "{{ seed_remote_base }}/clases/"
+        mode: "0644"
+        directory_mode: "0755"
+
+    - name: Copiar repositorio general al master
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../../examples/general/"
+        dest: "{{ seed_remote_base }}/repositorio/"
+        mode: "0644"
+        directory_mode: "0755"
+
+    - name: Crear pod temporal con los PVCs compartidos montados
+      kubernetes.core.k8s:
+        kubeconfig: "{{ k8s_kubeconfig }}"
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Pod
+          metadata:
+            name: "{{ seed_pod_name }}"
+            namespace: "{{ jupyterhub_namespace }}"
+            labels:
+              app.kubernetes.io/name: krnel-shared-seeder
+              app.kubernetes.io/component: seed-shared-examples
+          spec:
+            restartPolicy: Never
+            containers:
+              - name: "{{ seed_container_name }}"
+                image: alpine:3.20
+                command: ["/bin/sh", "-c", "mkdir -p {{ seed_tmp_base }} && sleep 3600"]
+                volumeMounts:
+                  - name: clases
+                    mountPath: "{{ seed_mount_base }}/clases"
+                  - name: comunidad
+                    mountPath: "{{ seed_mount_base }}/comunidad"
+                  - name: repositorio
+                    mountPath: "{{ seed_mount_base }}/repositorio"
+            volumes:
+              - name: clases
+                persistentVolumeClaim:
+                  claimName: "{{ jupyter_shared_clases_pvc }}"
+              - name: comunidad
+                persistentVolumeClaim:
+                  claimName: "{{ jupyter_shared_comunidad_pvc }}"
+              - name: repositorio
+                persistentVolumeClaim:
+                  claimName: "{{ jupyter_shared_repositorio_pvc }}"
+
+    - name: Esperar a que el pod temporal esté Running
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ k8s_kubeconfig }}"
+        api_version: v1
+        kind: Pod
+        namespace: "{{ jupyterhub_namespace }}"
+        name: "{{ seed_pod_name }}"
+        wait: true
+        wait_condition:
+          type: Ready
+          status: "True"
+        wait_timeout: 180
+
+    - name: Preparar directorios temporales dentro del pod
+      kubernetes.core.k8s_exec:
+        kubeconfig: "{{ k8s_kubeconfig }}"
+        namespace: "{{ jupyterhub_namespace }}"
+        pod: "{{ seed_pod_name }}"
+        container: "{{ seed_container_name }}"
+        command: >-
+          /bin/sh -c 'rm -rf {{ seed_tmp_base }} &&
+          mkdir -p {{ seed_tmp_base }}/comunidad {{ seed_tmp_base }}/clases {{ seed_tmp_base }}/repositorio'
+
+    - name: Copiar ejemplos de Comunidad al pod temporal
+      kubernetes.core.k8s_cp:
+        kubeconfig: "{{ k8s_kubeconfig }}"
+        namespace: "{{ jupyterhub_namespace }}"
+        pod: "{{ seed_pod_name }}"
+        container: "{{ seed_container_name }}"
+        local_path: "{{ seed_remote_base }}/comunidad"
+        remote_path: "{{ seed_tmp_base }}/comunidad"
+        no_preserve: true
+        state: to_pod
+
+    - name: Copiar ejemplos de Clases al pod temporal
+      kubernetes.core.k8s_cp:
+        kubeconfig: "{{ k8s_kubeconfig }}"
+        namespace: "{{ jupyterhub_namespace }}"
+        pod: "{{ seed_pod_name }}"
+        container: "{{ seed_container_name }}"
+        local_path: "{{ seed_remote_base }}/clases"
+        remote_path: "{{ seed_tmp_base }}/clases"
+        no_preserve: true
+        state: to_pod
+
+    - name: Copiar repositorio general al pod temporal
+      kubernetes.core.k8s_cp:
+        kubeconfig: "{{ k8s_kubeconfig }}"
+        namespace: "{{ jupyterhub_namespace }}"
+        pod: "{{ seed_pod_name }}"
+        container: "{{ seed_container_name }}"
+        local_path: "{{ seed_remote_base }}/repositorio"
+        remote_path: "{{ seed_tmp_base }}/repositorio"
+        no_preserve: true
+        state: to_pod
+
+    - name: Sincronizar ejemplos desde el pod hacia los PVCs Longhorn
+      kubernetes.core.k8s_exec:
+        kubeconfig: "{{ k8s_kubeconfig }}"
+        namespace: "{{ jupyterhub_namespace }}"
+        pod: "{{ seed_pod_name }}"
+        container: "{{ seed_container_name }}"
+        command: |
+          /bin/sh -c '
+          set -eu
+          mkdir -p {{ seed_mount_base }}/comunidad {{ seed_mount_base }}/clases {{ seed_mount_base }}/repositorio
+
+          copy_seed_dir() {
+            src_base="$1"
+            wrapper="$2"
+            dest="$3"
+
+            if [ -d "${src_base}/${wrapper}" ]; then
+              cp -a "${src_base}/${wrapper}/." "${dest}/"
+            else
+              cp -a "${src_base}/." "${dest}/"
+            fi
+
+            if [ -d "${dest}/${wrapper}" ]; then
+              cp -a "${dest}/${wrapper}/." "${dest}/"
+              rm -rf "${dest:?}/${wrapper}"
+            fi
+          }
+
+          copy_seed_dir {{ seed_tmp_base }}/comunidad comunidad {{ seed_mount_base }}/comunidad
+          copy_seed_dir {{ seed_tmp_base }}/clases clases {{ seed_mount_base }}/clases
+          copy_seed_dir {{ seed_tmp_base }}/repositorio repositorio {{ seed_mount_base }}/repositorio
+
+          chown -R 1000:100 {{ seed_mount_base }}/comunidad {{ seed_mount_base }}/clases {{ seed_mount_base }}/repositorio
+          chmod -R a+rwX {{ seed_mount_base }}/comunidad
+          chmod -R a+rX {{ seed_mount_base }}/clases {{ seed_mount_base }}/repositorio
+          '
+
+    - name: Mostrar contenido sembrado en PVCs compartidos
+      kubernetes.core.k8s_exec:
+        kubeconfig: "{{ k8s_kubeconfig }}"
+        namespace: "{{ jupyterhub_namespace }}"
+        pod: "{{ seed_pod_name }}"
+        container: "{{ seed_container_name }}"
+        command: >-
+          /bin/sh -c 'find {{ seed_mount_base }} -path "*/lost+found" -prune -o -maxdepth 2 -type f -print | sort'
+      register: seeded_files
+
+    - name: Eliminar pod temporal de siembra
+      kubernetes.core.k8s:
+        kubeconfig: "{{ k8s_kubeconfig }}"
+        api_version: v1
+        kind: Pod
+        namespace: "{{ jupyterhub_namespace }}"
+        name: "{{ seed_pod_name }}"
+        state: absent
+        wait: true
+        wait_timeout: 120
+
+    - name: Limpiar staging temporal de ejemplos en el master
+      ansible.builtin.file:
+        path: "{{ seed_remote_base }}"
+        state: absent
+
+    - name: Imprimir confirmación
+      ansible.builtin.debug:
+        msg:
+          message: "Archivos de ejemplo copiados exitosamente a los PVCs compartidos Longhorn."
+          files: "{{ seeded_files.stdout_lines | default([]) }}"

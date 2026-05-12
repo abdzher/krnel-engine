@@ -355,6 +355,8 @@ def try_spark_config(name, master, extra_conf=None, timeout=60):
 
     except Exception as e:
         elapsed = time.monotonic() - start if 'start' in dir() else 0
+        full_trace = traceback.format_exc()
+
         # Extraer solo la causa raíz del stacktrace de Java
         err_str = str(e)
         root_cause = err_str
@@ -365,6 +367,10 @@ def try_spark_config(name, master, extra_conf=None, timeout=60):
                 root_cause = err_str[idx:idx + 200]
                 break
         log(f"  ❌ FALLO en {elapsed:.1f}s: {root_cause[:200]}", "ERROR")
+        log("  --- Traceback completo ---", "ERROR")
+        for line in full_trace.splitlines():
+            log(f"  {line}", "ERROR")
+        log("  --- Fin traceback ---", "ERROR")
         return False, root_cause[:500], elapsed
 
 

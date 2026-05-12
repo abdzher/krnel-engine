@@ -4,9 +4,8 @@
 # Tarea 8: Despliegue de JupyterHub sobre k3s.
 #
 # PRE-REQUISITOS antes de ejecutar:
-#   1. proxy_token y jupyterhub_admin_pass deben estar cifrados en Ansible Vault.
+#   1. proxy_token debe estar cifrado en Ansible Vault.
 #      ansible-vault encrypt_string "$(openssl rand -hex 32)" --name proxy_token
-#      ansible-vault encrypt_string "contraseñasegura" --name jupyterhub_admin_pass
 #   2. Copiar files/allowlist.txt.example a files/allowlist.txt y agregar
 #      los correos electrónicos autorizados (uno por línea).
 #
@@ -27,12 +26,21 @@
         state: file
         suffix: -hub.yaml
       register: tmp_hub_values
+      tags: [update, update_dry]
 
     - name: Crear archivo temporal para spark-rbac
       ansible.builtin.tempfile:
         state: file
         suffix: -rbac.yaml
       register: tmp_spark_rbac
+      tags: [update]
+
+    - name: Crear archivo temporal para PVCs compartidos
+      ansible.builtin.tempfile:
+        state: file
+        suffix: -shared-pvcs.yaml
+      register: tmp_shared_pvcs
+      tags: [update]
 
     # -------------------------------------------------------------------------
     # Pre-validaciones
@@ -42,6 +50,7 @@
         path: "{{ playbook_dir }}/../files/allowlist.txt"
       register: allowlist_stat
       delegate_to: localhost
+      tags: [update, update_dry]
 
     - name: Fallar si allowlist.txt no existe
       ansible.builtin.fail:
@@ -50,6 +59,7 @@
           Copia 'files/allowlist.example.txt' a 'files/allowlist.txt' y
           agrega los correos autorizados (uno por línea).
       when: not allowlist_stat.stat.exists
+      tags: [update, update_dry]
 
     - name: Verificar que proxy_token no es el valor de ejemplo
       ansible.builtin.fail:
@@ -57,6 +67,7 @@
           'proxy_token' contiene el valor de ejemplo. Genera y cifra el token real:
           ansible-vault encrypt_string "$(openssl rand -hex 32)" --name proxy_token
       when: proxy_token == "REEMPLAZAR_CON_ANSIBLE_VAULT"
+      tags: [update, update_dry]
 
     # -------------------------------------------------------------------------
     # ResourceQuota y LimitRange — aplicar ANTES de desplegar JupyterHub
@@ -69,6 +80,7 @@
         kind: Namespace
         name: "{{ jupyterhub_namespace }}"
         state: present
+      tags: [update]
 
     - name: Renderizar spark-quota.yaml desde plantilla
       ansible.builtin.template:
@@ -76,17 +88,79 @@
         dest: "/tmp/spark-quota-{{ ansible_facts['date_time']['epoch'] }}.yaml"
         mode: "0644"
       register: quota_tmp
+      tags: [update]
 
     - name: Aplicar ResourceQuota y LimitRange al namespace jupyter
       kubernetes.core.k8s:
         kubeconfig: "{{ k8s_kubeconfig }}"
         state: present
         src: "{{ quota_tmp.dest }}"
+      tags: [update]
 
     - name: Limpiar spark-quota.yaml temporal
       ansible.builtin.file:
         path: "{{ quota_tmp.dest }}"
         state: absent
+      tags: [update]
+
+    # -------------------------------------------------------------------------
+    # PVC de base de datos del Hub
+    # El chart normalmente lo crea, pero declararlo aquí evita que el Deployment
+    # quede Pending si el PVC fue borrado o quedó fuera del release.
+    # -------------------------------------------------------------------------
+    - name: Asegurar PVC sqlite del Hub sobre Longhorn
+      kubernetes.core.k8s:
+        kubeconfig: "{{ k8s_kubeconfig }}"
+        state: present
+        definition:
+          apiVersion: v1
+          kind: PersistentVolumeClaim
+          metadata:
+            name: hub-db-dir
+            namespace: "{{ jupyterhub_namespace }}"
+            labels:
+              app: jupyterhub
+              app.kubernetes.io/component: hub
+              app.kubernetes.io/instance: "{{ jupyterhub_release }}"
+              app.kubernetes.io/managed-by: Helm
+              app.kubernetes.io/name: jupyterhub
+              component: hub
+              heritage: Helm
+              release: "{{ jupyterhub_release }}"
+            annotations:
+              meta.helm.sh/release-name: "{{ jupyterhub_release }}"
+              meta.helm.sh/release-namespace: "{{ jupyterhub_namespace }}"
+          spec:
+            accessModes:
+              - ReadWriteOnce
+            storageClassName: "{{ storage_class_name }}"
+            resources:
+              requests:
+                storage: 1Gi
+      tags: [update]
+
+    # -------------------------------------------------------------------------
+    # PVCs compartidos — reemplazo Longhorn RWX para clases/comunidad/repositorio
+    # -------------------------------------------------------------------------
+    - name: Renderizar PVCs compartidos sobre Longhorn
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../templates/jupyter-shared-pvcs.yaml.j2"
+        dest: "{{ tmp_shared_pvcs.path }}"
+        mode: "0644"
+      tags: [update]
+
+    - name: Aplicar PVCs compartidos de JupyterHub
+      kubernetes.core.k8s:
+        kubeconfig: "{{ k8s_kubeconfig }}"
+        state: present
+        src: "{{ tmp_shared_pvcs.path }}"
+      tags: [update]
+
+    - name: Limpiar manifest temporal de PVCs compartidos
+      ansible.builtin.file:
+        path: "{{ tmp_shared_pvcs.path }}"
+        state: absent
+      tags: [update]
 
     # -------------------------------------------------------------------------
     # Repositorio Helm de JupyterHub
@@ -97,6 +171,7 @@
         name: jupyterhub
         repo_url: "https://hub.jupyter.org/helm-chart/"
         state: present
+      tags: [update, update_dry]
 
     # -------------------------------------------------------------------------
     # RBAC de Spark
@@ -106,17 +181,20 @@
         src: "{{ playbook_dir }}/../templates/spark-rbac.yaml.j2"
         dest: "{{ tmp_spark_rbac.path }}"
         mode: "0644"
+      tags: [update]
 
     - name: Aplicar políticas RBAC de Spark al clúster
       kubernetes.core.k8s:
         kubeconfig: "{{ k8s_kubeconfig }}"
         state: present
         src: "{{ tmp_spark_rbac.path }}"
+      tags: [update]
 
     - name: Limpiar spark-rbac.yaml temporal
       ansible.builtin.file:
         path: "{{ tmp_spark_rbac.path }}"
         state: absent
+      tags: [update]
 
     # -------------------------------------------------------------------------
     # Despliegue de JupyterHub
@@ -128,6 +206,7 @@
         src: "{{ playbook_dir }}/../templates/hub-values.yaml.j2"
         dest: "{{ tmp_hub_values.path }}"
         mode: "0600"   # Permisos restrictivos: contiene credenciales
+      tags: [update, update_dry]
 
     - name: Instalar/Actualizar JupyterHub (upgrade --install)
       kubernetes.core.helm:
@@ -161,23 +240,73 @@
       ansible.builtin.file:
         path: "{{ tmp_hub_values.path }}"
         state: absent
+      tags: [update, update_dry]
 
     # -------------------------------------------------------------------------
     # Verificación
     # -------------------------------------------------------------------------
-    - name: Esperar a que el Hub esté disponible
-      kubernetes.core.k8s_info:
-        kubeconfig: "{{ k8s_kubeconfig }}"
-        kind: Deployment
-        namespace: "{{ jupyterhub_namespace }}"
-        name: hub
-        wait: true
-        wait_condition:
-          type: Available
-          status: "True"
-        wait_timeout: 300
-      register: hub_status
-      ignore_errors: true
+    - name: Verificar disponibilidad del Hub
+      tags: [update]
+      block:
+        - name: Esperar a que el Hub esté disponible
+          kubernetes.core.k8s_info:
+            kubeconfig: "{{ k8s_kubeconfig }}"
+            kind: Deployment
+            namespace: "{{ jupyterhub_namespace }}"
+            name: hub
+            wait: true
+            wait_condition:
+              type: Available
+              status: "True"
+            wait_timeout: 200
+          register: hub_status
+
+      rescue:
+        - name: Diagnóstico | Pods de JupyterHub
+          ansible.builtin.command: >-
+            kubectl --kubeconfig {{ k8s_kubeconfig }} -n {{ jupyterhub_namespace }}
+            get pods -o wide
+          register: jupyterhub_get_pods
+          changed_when: false
+          failed_when: false
+
+        - name: Diagnóstico | PVCs de JupyterHub
+          ansible.builtin.command: >-
+            kubectl --kubeconfig {{ k8s_kubeconfig }} -n {{ jupyterhub_namespace }}
+            get pvc -o wide
+          register: jupyterhub_get_pvcs
+          changed_when: false
+          failed_when: false
+
+        - name: Diagnóstico | Descripción de pods
+          ansible.builtin.command: >-
+            kubectl --kubeconfig {{ k8s_kubeconfig }} -n {{ jupyterhub_namespace }}
+            describe pods
+          register: jupyterhub_describe_pods
+          changed_when: false
+          failed_when: false
+
+        - name: Diagnóstico | Eventos recientes
+          ansible.builtin.command: >-
+            kubectl --kubeconfig {{ k8s_kubeconfig }} -n {{ jupyterhub_namespace }}
+            get events --sort-by=.metadata.creationTimestamp
+          register: jupyterhub_get_events
+          changed_when: false
+          failed_when: false
+
+        - name: Mostrar diagnóstico de fallo de JupyterHub
+          ansible.builtin.debug:
+            msg:
+              pods: "{{ jupyterhub_get_pods.stdout_lines | default([]) }}"
+              pvcs: "{{ jupyterhub_get_pvcs.stdout_lines | default([]) }}"
+              pod_details: "{{ jupyterhub_describe_pods.stdout_lines | default([]) }}"
+              events: "{{ jupyterhub_get_events.stdout_lines | default([]) }}"
+
+        - name: Fallar si el Hub no quedó disponible
+          ansible.builtin.fail:
+            msg: >
+              JupyterHub no quedó disponible dentro del timeout. Revisa los pods
+              y eventos mostrados arriba en el namespace '{{ jupyterhub_namespace }}'.
 
     - name: Confirmar despliegue de JupyterHub
       ansible.builtin.debug:
@@ -185,3 +314,4 @@
           JupyterHub '{{ jupyterhub_release }}' v{{ jupyterhub_version }} desplegado en
           namespace '{{ jupyterhub_namespace }}'. Accesible en NodePort {{ jupyterhub_port }}
           y dominio https://{{ jupyterhub_domain }}.
+      tags: [update]

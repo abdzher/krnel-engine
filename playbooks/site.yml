@@ -11,9 +11,11 @@
 #   prep, system    → 00-system-prep  (apt, hosts, UFW, swap)
 #   k3s             → 01-k3s-install  (Control Plane + Agents)
 #   helm, certmgr   → 02-helm-certmgr (Helm binary + Cert-Manager)
-#   nfs             → 03-nfs-setup    (Servidor NFS + Provisioner)
+#   longhorn        → 03-longhorn     (StorageClass HA por defecto)
+#   nfs             → 03-nfs-setup    (DEPRECADO: NFS legado, no corre en site.yml)
 #   monitoring, vm  → 04-monitoring   (VictoriaMetrics stack)
 #   jupyter         → 05-jupyterhub   (JupyterHub)
+#   landing         → 06-landing-page (portal MRKOV)
 # =============================================================================
 
 - name: "00 | Preparación del sistema"
@@ -28,9 +30,9 @@
   ansible.builtin.import_playbook: 02-helm-certmgr.yml
   tags: [helm, certmgr]
 
-- name: "03 | Configuración NFS y Provisioner"
-  ansible.builtin.import_playbook: 03-nfs-setup.yml
-  tags: [nfs]
+- name: "03 | Longhorn"
+  ansible.builtin.import_playbook: 03-longhorn.yml
+  tags: [longhorn, storage]
 
 - name: "04 | Monitoreo con VictoriaMetrics"
   ansible.builtin.import_playbook: 04-monitoring.yml
@@ -39,3 +41,7 @@
 - name: "05 | Despliegue de JupyterHub"
   ansible.builtin.import_playbook: 05-jupyterhub.yml
   tags: [jupyter]
+
+- name: "06 | Landing page MRKOV"
+  ansible.builtin.import_playbook: 06-landing-page.yml
+  tags: [landing]

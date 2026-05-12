@@ -41,6 +41,20 @@
         name: python3-pip
         state: present
 
+    - name: Instalar prerequisitos de almacenamiento para Longhorn
+      ansible.builtin.apt:
+        name:
+          - open-iscsi
+          - util-linux
+          - nfs-common
+        state: present
+
+    - name: Asegurar que iscsid está habilitado y corriendo
+      ansible.builtin.systemd:
+        name: iscsid
+        state: started
+        enabled: true
+
     - name: Instalar librería kubernetes actualizada vía pip (evita warnings)
       ansible.builtin.pip:
         name: kubernetes>=24.2.0

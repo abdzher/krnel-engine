@@ -148,7 +148,7 @@
 
     # --- 1.19: Verificar ServiceAccount spark-editor ---
     - name: "1.19 | ServiceAccount spark-editor"
-      ansible.builtin.command: kubectl get sa spark-editor -n jupyter -o yaml
+      ansible.builtin.command: kubectl get sa spark-editor -n {{ jupyterhub_namespace }} -o yaml
       register: kubectl_sa
       changed_when: false
       failed_when: false
@@ -156,8 +156,81 @@
 
     # --- 1.20: Reglas RBAC de spark ---
     - name: "1.20 | RoleBinding de spark-editor"
-      ansible.builtin.command: kubectl get rolebinding spark-editor-binding -n jupyter -o yaml
+      ansible.builtin.command: kubectl get rolebinding spark-editor-binding -n {{ jupyterhub_namespace }} -o yaml
       register: kubectl_rb
+      changed_when: false
+      failed_when: false
+      become: false
+
+    - name: "1.21 | Permisos efectivos de spark-editor"
+      ansible.builtin.shell: |
+        set -o pipefail
+        for rule in \
+          "create pods" \
+          "get pods" \
+          "list pods" \
+          "watch pods" \
+          "delete pods" \
+          "create services" \
+          "delete services" \
+          "create configmaps" \
+          "delete configmaps" \
+          "get pods/log"; do
+          verb="$(echo "$rule" | awk '{print $1}')"
+          resource="$(echo "$rule" | awk '{print $2}')"
+          printf "%-18s " "$rule"
+          kubectl auth can-i "$verb" "$resource" \
+            -n {{ jupyterhub_namespace }} \
+            --as=system:serviceaccount:{{ jupyterhub_namespace }}:spark-editor
+        done
+      args:
+        executable: /bin/bash
+      register: kubectl_spark_can_i
+      changed_when: false
+      failed_when: false
+      become: false
+
+    - name: "1.22 | NetworkPolicies de jupyter"
+      ansible.builtin.command: kubectl get networkpolicy -n {{ jupyterhub_namespace }} -o wide
+      register: kubectl_jupyter_networkpolicies
+      changed_when: false
+      failed_when: false
+      become: false
+
+    - name: "1.23 | Pods executor recientes"
+      ansible.builtin.command: kubectl get pods -n {{ jupyterhub_namespace }} -l spark-role=executor -o wide
+      register: kubectl_spark_executor_pods
+      changed_when: false
+      failed_when: false
+      become: false
+
+    - name: "1.24 | Describe/logs de executor pods recientes"
+      ansible.builtin.shell: |
+        set -o pipefail
+        pods="$(kubectl get pods -n {{ jupyterhub_namespace }} -l spark-role=executor -o name 2>/dev/null || true)"
+        if [ -z "$pods" ]; then
+          echo "No hay executor pods con label spark-role=executor."
+          exit 0
+        fi
+
+        for pod in $pods; do
+          echo
+          echo "===== DESCRIBE $pod ====="
+          kubectl describe -n {{ jupyterhub_namespace }} "$pod" || true
+          echo
+          echo "===== LOGS $pod ====="
+          kubectl logs -n {{ jupyterhub_namespace }} "$pod" --all-containers --tail=200 || true
+        done
+      args:
+        executable: /bin/bash
+      register: kubectl_spark_executor_details
+      changed_when: false
+      failed_when: false
+      become: false
+
+    - name: "1.25 | Eventos recientes de jupyter"
+      ansible.builtin.command: kubectl get events -n {{ jupyterhub_namespace }} --sort-by=.metadata.creationTimestamp
+      register: kubectl_jupyter_events
       changed_when: false
       failed_when: false
       become: false
@@ -249,6 +322,26 @@
 
           ┌─ 1.20 RoleBinding spark-editor ────────────────────────────────────┐
           {{ kubectl_rb.stdout | default('(vacío)') }}
+          └────────────────────────────────────────────────────────────────────┘
+
+          ┌─ 1.21 Permisos efectivos spark-editor ─────────────────────────────┐
+          {{ kubectl_spark_can_i.stdout | default('(vacío)') }}
+          └────────────────────────────────────────────────────────────────────┘
+
+          ┌─ 1.22 NetworkPolicies jupyter ─────────────────────────────────────┐
+          {{ kubectl_jupyter_networkpolicies.stdout | default('(vacío)') }}
+          └────────────────────────────────────────────────────────────────────┘
+
+          ┌─ 1.23 Pods executor recientes ─────────────────────────────────────┐
+          {{ kubectl_spark_executor_pods.stdout | default('(vacío)') }}
+          └────────────────────────────────────────────────────────────────────┘
+
+          ┌─ 1.24 Describe/logs de executor pods ──────────────────────────────┐
+          {{ kubectl_spark_executor_details.stdout | default('(vacío)') }}
+          └────────────────────────────────────────────────────────────────────┘
+
+          ┌─ 1.25 Eventos recientes jupyter ───────────────────────────────────┐
+          {{ kubectl_jupyter_events.stdout | default('(vacío)') }}
           └────────────────────────────────────────────────────────────────────┘
 
 # =============================================================================

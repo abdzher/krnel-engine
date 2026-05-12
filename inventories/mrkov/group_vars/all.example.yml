@@ -35,6 +35,7 @@ k3s_version:          "v1.35.3+k3s1"
 helm_version:         "3.17.3"
 cert_manager_version: "v1.20.2"
 jupyterhub_version:   "4.2.0"
+longhorn_version:     "1.11.2"
 
 # SHA-256 del tarball de Helm para linux/amd64.
 # Obtener en: https://github.com/helm/helm/releases/tag/v{{ helm_version }}
@@ -47,13 +48,42 @@ helm_checksum: "sha256:REEMPLAZAR_CON_CHECKSUM_SHA256_DE_helm-v3.17.3-linux-amd6
 nfs_server_ip: "{{ nd1_ip }}"
 nfs_base_path: "/srv/nfs"
 nfs_shares:
-  - jupyter-data   # PVCs dinámicos de JupyterHub (provisionados por NFS-provisioner)
+  - jupyter-data    # Share legado; los PVCs dinámicos usan Longhorn
   - comunidad       # Carpeta compartida de escritura para alumnos
   - clases          # Carpeta de solo lectura para alumnos, escritura para profesores
   - repositorio     # Datasets y recursos de solo lectura general
 
-# Storage class creada por el NFS Subdir Provisioner
-storage_class_name: "nfs-master"
+# StorageClass por defecto para PVCs dinámicos del clúster.
+storage_class_name: "longhorn"
+
+# -----------------------------------------------------------------------------
+# Longhorn
+# -----------------------------------------------------------------------------
+longhorn_release:               "longhorn"
+longhorn_namespace:             "longhorn-system"
+longhorn_data_path:             "/var/lib/longhorn"
+longhorn_default_replica_count: 2
+longhorn_domain:                "longhorn.midominio.com"
+longhorn_ingress_enabled:       false
+longhorn_nodeport_enabled:      true
+longhorn_nodeport:              30090
+longhorn_ui_allowed_cidrs:
+  - "{{ network_segment }}"
+
+# PVCs RWX compartidos para JupyterHub sobre Longhorn.
+jupyter_shared_clases_pvc:      "jupyter-shared-clases"
+jupyter_shared_comunidad_pvc:   "jupyter-shared-comunidad"
+jupyter_shared_repositorio_pvc: "jupyter-shared-repositorio"
+jupyter_shared_clases_size:     "20Gi"
+jupyter_shared_comunidad_size:  "50Gi"
+jupyter_shared_repositorio_size: "100Gi"
+
+# -----------------------------------------------------------------------------
+# NFS legado / carpetas compartidas
+# -----------------------------------------------------------------------------
+# DEPRECADO: usar solo para migración o rollback. El flujo principal usa Longhorn.
+nfs_provisioner_enabled: false
+nfs_storage_class_name: "nfs-master"
 
 # Kubeconfig en el nodo master (usado por módulos kubernetes.core)
 k8s_kubeconfig: "/home/ansible/.kube/config"
@@ -78,6 +108,11 @@ jupyterhub_port:       50080     # puerto donde se expone el JupyterHub a traves
 jupyterhub_admin_user: "admin"
 
 # -----------------------------------------------------------------------------
+# Portal MRKOV
+# -----------------------------------------------------------------------------
+mrkov_domain: "mrkov.midominio.com"
+
+# -----------------------------------------------------------------------------
 # Spark on Kubernetes
 # -----------------------------------------------------------------------------
 # Tag fijo de la imagen — verificar disponible en:
@@ -90,7 +125,11 @@ spark_image_tag: "spark-4.1.1"
 # en su SparkSession, dentro de los límites impuestos por ResourceQuota.
 spark_executor_instances: 2     # Número de executors por job
 spark_executor_cores:     1     # CPUs por executor
+spark_executor_request_cores: "500m"
+spark_executor_limit_cores:   "1"
 spark_executor_memory:    "2g"  # RAM por executor
+spark_executor_memory_overhead: "512m"
+spark_executor_delete_on_termination: false  # Mantener pods fallidos mientras estabilizamos Spark
 
 # -----------------------------------------------------------------------------
 # ResourceQuota del namespace jupyter
@@ -123,7 +162,8 @@ jupyter_limit_pod_memory_max:             "12Gi"
 # [VAULT] Credenciales — NUNCA en texto plano en Git
 # -----------------------------------------------------------------------------
 # Generar proxy_token con: openssl rand -hex 32
-# Cifrar ambas variables con ansible-vault antes de hacer commit.
+# jupyterhub_admin_pass queda legado; NativeAuthenticator requiere signup inicial
+# del usuario definido en jupyterhub_admin_user.
 proxy_token:            !vault |
           $ANSIBLE_VAULT...REEMPLAZAR_CON_ANSIBLE_VAULT
 jupyterhub_admin_pass:  !vault |

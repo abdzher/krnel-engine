@@ -3,7 +3,7 @@
 # KRNEL — playbooks/03-nfs-setup.yml
 # Tarea 5: Instalación y configuración del servidor NFS en nd-1 y
 #          del cliente NFS en los workers.
-# Tarea 6: Instalación del NFS Subdir External Provisioner (StorageClass dinámica).
+# Tarea 6: Instalación opcional del CSI NFS legado (StorageClass no default).
 # =============================================================================
 
 # -----------------------------------------------------------------------------
@@ -73,52 +73,55 @@
 
 # -----------------------------------------------------------------------------
 # TAREA 6 — CSI Driver NFS
-# Instala el driver oficial CSI y crea la StorageClass 'nfs-master'
-# para los PVCs de JupyterHub.
+# Instala el driver oficial CSI y crea una StorageClass NFS no default solo si
+# nfs_provisioner_enabled=true. Los PVCs dinámicos principales usan Longhorn.
 # -----------------------------------------------------------------------------
 - name: "TAREA 6 | Instalar CSI Driver NFS"
   hosts: master
   become: false
   tasks:
-    - name: Agregar repositorio Helm del CSI Driver NFS
-      kubernetes.core.helm_repository:
-        kubeconfig: "{{ k8s_kubeconfig }}"
-        name: csi-driver-nfs
-        repo_url: "https://raw.githubusercontent.com/kubernetes-csi/csi-driver-nfs/master/charts"
-        state: present
+    - name: Instalar CSI Driver NFS legado si está habilitado
+      when: nfs_provisioner_enabled | default(false) | bool
+      block:
+        - name: Agregar repositorio Helm del CSI Driver NFS
+          kubernetes.core.helm_repository:
+            kubeconfig: "{{ k8s_kubeconfig }}"
+            name: csi-driver-nfs
+            repo_url: "https://raw.githubusercontent.com/kubernetes-csi/csi-driver-nfs/master/charts"
+            state: present
 
-    - name: Instalar/Actualizar CSI Driver NFS
-      kubernetes.core.helm:
-        kubeconfig: "{{ k8s_kubeconfig }}"
-        name: csi-driver-nfs
-        chart_ref: csi-driver-nfs/csi-driver-nfs
-        chart_version: "4.13.2"
-        release_namespace: kube-system
-        update_repo_cache: true
-        values:
-          storageClass:
-            create: true
-            name: "{{ storage_class_name }}"
-            defaultClass: false
-            parameters:
-              server: "{{ nd1_ip }}"
-              share: "{{ nfs_base_path }}/jupyter-data"
-            reclaimPolicy: Delete
-            volumeBindingMode: Immediate
-            mountOptions:
-              - nfsvers=4.1
-        state: present
+        - name: Instalar/Actualizar CSI Driver NFS
+          kubernetes.core.helm:
+            kubeconfig: "{{ k8s_kubeconfig }}"
+            name: csi-driver-nfs
+            chart_ref: csi-driver-nfs/csi-driver-nfs
+            chart_version: "4.13.2"
+            release_namespace: kube-system
+            update_repo_cache: true
+            values:
+              storageClass:
+                create: true
+                name: "{{ nfs_storage_class_name }}"
+                defaultClass: false
+                parameters:
+                  server: "{{ nd1_ip }}"
+                  share: "{{ nfs_base_path }}/jupyter-data"
+                reclaimPolicy: Delete
+                volumeBindingMode: Immediate
+                mountOptions:
+                  - nfsvers=4.1
+            state: present
 
-    - name: Verificar que la StorageClass fue creada
-      kubernetes.core.k8s_info:
-        kubeconfig: "{{ k8s_kubeconfig }}"
-        kind: StorageClass
-        name: "{{ storage_class_name }}"
-      register: sc_info
-      retries: 6
-      delay: 10
-      until: sc_info.resources | length > 0
+        - name: Verificar que la StorageClass fue creada
+          kubernetes.core.k8s_info:
+            kubeconfig: "{{ k8s_kubeconfig }}"
+            kind: StorageClass
+            name: "{{ nfs_storage_class_name }}"
+          register: sc_info
+          retries: 6
+          delay: 10
+          until: sc_info.resources | length > 0
 
-    - name: Confirmar StorageClass disponible
-      ansible.builtin.debug:
-        msg: "StorageClass '{{ storage_class_name }}' creada y disponible."
+        - name: Confirmar StorageClass disponible
+          ansible.builtin.debug:
+            msg: "StorageClass NFS legado '{{ nfs_storage_class_name }}' creada y disponible."

@@ -1,0 +1,48 @@
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ jupyter_shared_clases_pvc }}
+  namespace: {{ jupyterhub_namespace }}
+  labels:
+    app.kubernetes.io/part-of: jupyterhub
+    app.kubernetes.io/component: shared-storage
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: {{ storage_class_name }}
+  resources:
+    requests:
+      storage: {{ jupyter_shared_clases_size }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ jupyter_shared_comunidad_pvc }}
+  namespace: {{ jupyterhub_namespace }}
+  labels:
+    app.kubernetes.io/part-of: jupyterhub
+    app.kubernetes.io/component: shared-storage
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: {{ storage_class_name }}
+  resources:
+    requests:
+      storage: {{ jupyter_shared_comunidad_size }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ jupyter_shared_repositorio_pvc }}
+  namespace: {{ jupyterhub_namespace }}
+  labels:
+    app.kubernetes.io/part-of: jupyterhub
+    app.kubernetes.io/component: shared-storage
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: {{ storage_class_name }}
+  resources:
+    requests:
+      storage: {{ jupyter_shared_repositorio_size }}

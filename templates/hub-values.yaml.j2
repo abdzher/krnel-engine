@@ -5,7 +5,6 @@
 #
 # Variables sensibles inyectadas desde Ansible Vault:
 #   - proxy_token
-#   - jupyterhub_admin_pass
 # ==============================================================================
 
 singleuser:
@@ -69,22 +68,25 @@ singleuser:
         volumes:
           - name: home-emptydir
             emptyDir: {}
-          - name: nfs-clases
-            nfs: { server: {{ nd1_ip }}, path: {{ nfs_base_path }}/clases }
-          - name: nfs-comunidad
-            nfs: { server: {{ nd1_ip }}, path: {{ nfs_base_path }}/comunidad }
-          - name: nfs-repositorio
-            nfs: { server: {{ nd1_ip }}, path: {{ nfs_base_path }}/repositorio }
+          - name: shared-clases
+            persistentVolumeClaim:
+              claimName: {{ jupyter_shared_clases_pvc }}
+          - name: shared-comunidad
+            persistentVolumeClaim:
+              claimName: {{ jupyter_shared_comunidad_pvc }}
+          - name: shared-repositorio
+            persistentVolumeClaim:
+              claimName: {{ jupyter_shared_repositorio_pvc }}
         volume_mounts:
           - name: home-emptydir
             mountPath: /home/jovyan
-          - name: nfs-clases
+          - name: shared-clases
             mountPath: /home/jovyan/Clases
             readOnly: true
-          - name: nfs-comunidad
+          - name: shared-comunidad
             mountPath: /home/jovyan/Comunidad
             readOnly: true
-          - name: nfs-repositorio
+          - name: shared-repositorio
             mountPath: /home/jovyan/Repositorio
             readOnly: true
 
@@ -100,6 +102,7 @@ singleuser:
         cpu_guarantee: 1
         mem_limit: "12G"
         mem_guarantee: "1G"
+        storage_pvc_ensure: true
         storage_capacity: "2Gi"
         storage_class: {{ storage_class_name }}
         storage_access_modes: ["ReadWriteOnce"]
@@ -117,11 +120,26 @@ singleuser:
                   spark.master                                    k8s://https://kubernetes.default.svc:443
                   spark.kubernetes.container.image                quay.io/jupyter/all-spark-notebook:{{ spark_image_tag }}
                   spark.kubernetes.namespace                      {{ jupyterhub_namespace }}
-                  spark.kubernetes.authenticate.serviceAccountName spark-editor
+                  spark.kubernetes.authenticate.driver.serviceAccountName spark-editor
                   spark.executor.instances                        {{ spark_executor_instances }}
                   spark.executor.cores                            {{ spark_executor_cores }}
                   spark.executor.memory                           {{ spark_executor_memory }}
-                  spark.kubernetes.executor.podTemplateFile       /home/jovyan/.spark_conf/executor-pod-template.yaml
+                  spark.executor.memoryOverhead                   {{ spark_executor_memory_overhead }}
+                  spark.kubernetes.executor.request.cores          {{ spark_executor_request_cores }}
+                  spark.kubernetes.executor.limit.cores            {{ spark_executor_limit_cores }}
+                  spark.kubernetes.executor.podTemplateFile        /home/jovyan/.spark_conf/executor-pod-template.yaml
+                  spark.kubernetes.executor.podTemplateContainerName spark-kubernetes-executor
+                  spark.kubernetes.driver.pod.name                 ${HOSTNAME}
+                  spark.kubernetes.executor.deleteOnTermination    {{ (spark_executor_delete_on_termination | bool) | ternary('true', 'false') }}
+                  spark.kubernetes.executor.volumes.persistentVolumeClaim.shared-clases.options.claimName {{ jupyter_shared_clases_pvc }}
+                  spark.kubernetes.executor.volumes.persistentVolumeClaim.shared-clases.mount.path /home/jovyan/Clases
+                  spark.kubernetes.executor.volumes.persistentVolumeClaim.shared-clases.mount.readOnly true
+                  spark.kubernetes.executor.volumes.persistentVolumeClaim.shared-comunidad.options.claimName {{ jupyter_shared_comunidad_pvc }}
+                  spark.kubernetes.executor.volumes.persistentVolumeClaim.shared-comunidad.mount.path /home/jovyan/Comunidad
+                  spark.kubernetes.executor.volumes.persistentVolumeClaim.shared-comunidad.mount.readOnly false
+                  spark.kubernetes.executor.volumes.persistentVolumeClaim.shared-repositorio.options.claimName {{ jupyter_shared_repositorio_pvc }}
+                  spark.kubernetes.executor.volumes.persistentVolumeClaim.shared-repositorio.mount.path /home/jovyan/Repositorio
+                  spark.kubernetes.executor.volumes.persistentVolumeClaim.shared-repositorio.mount.readOnly true
                   spark.driver.host                               ${POD_IP}
                   spark.driver.bindAddress                        0.0.0.0
                   spark.driver.port                               7077
@@ -132,24 +150,35 @@ singleuser:
                   kind: Pod
                   spec:
                     containers:
-                    - name: spark-kubernetes-executor
-                      command: ["/bin/bash", "-c", "exec /usr/local/spark/bin/spark-class org.apache.spark.executor.CoarseGrainedExecutorBackend --driver-url $SPARK_DRIVER_URL --executor-id $SPARK_EXECUTOR_ID --cores $SPARK_EXECUTOR_CORES --app-id $SPARK_APPLICATION_ID --hostname $SPARK_EXECUTOR_POD_IP --resourceProfileId $SPARK_RESOURCE_PROFILE_ID"]
+                      - name: spark-kubernetes-executor
+                        command:
+                          - /bin/bash
+                          - -c
+                          - exec /usr/local/spark/bin/spark-class org.apache.spark.executor.CoarseGrainedExecutorBackend --driver-url ${SPARK_DRIVER_URL} --executor-id ${SPARK_EXECUTOR_ID} --cores ${SPARK_EXECUTOR_CORES} --app-id ${SPARK_APPLICATION_ID} --hostname ${SPARK_EXECUTOR_POD_IP} --resourceProfileId ${SPARK_RESOURCE_PROFILE_ID}
                   PODEOF
         volumes:
-          - name: nfs-clases
-            nfs: { server: {{ nd1_ip }}, path: {{ nfs_base_path }}/clases }
-          - name: nfs-comunidad
-            nfs: { server: {{ nd1_ip }}, path: {{ nfs_base_path }}/comunidad }
-          - name: nfs-repositorio
-            nfs: { server: {{ nd1_ip }}, path: {{ nfs_base_path }}/repositorio }
+          - name: volume-{username}
+            persistentVolumeClaim:
+              claimName: claim-{username}
+          - name: shared-clases
+            persistentVolumeClaim:
+              claimName: {{ jupyter_shared_clases_pvc }}
+          - name: shared-comunidad
+            persistentVolumeClaim:
+              claimName: {{ jupyter_shared_comunidad_pvc }}
+          - name: shared-repositorio
+            persistentVolumeClaim:
+              claimName: {{ jupyter_shared_repositorio_pvc }}
         volume_mounts:
-          - name: nfs-clases
+          - name: volume-{username}
+            mountPath: /home/jovyan
+          - name: shared-clases
             mountPath: /home/jovyan/Clases
             readOnly: true
-          - name: nfs-comunidad
+          - name: shared-comunidad
             mountPath: /home/jovyan/Comunidad
             readOnly: false
-          - name: nfs-repositorio
+          - name: shared-repositorio
             mountPath: /home/jovyan/Repositorio
             readOnly: true
 
@@ -164,6 +193,7 @@ singleuser:
         cpu_guarantee: 1
         mem_limit: "12G"
         mem_guarantee: "1G"
+        storage_pvc_ensure: true
         storage_capacity: "5Gi"
         storage_class: {{ storage_class_name }}
         storage_access_modes: ["ReadWriteOnce"]
@@ -181,11 +211,26 @@ singleuser:
                   spark.master                                    k8s://https://kubernetes.default.svc:443
                   spark.kubernetes.container.image                quay.io/jupyter/all-spark-notebook:{{ spark_image_tag }}
                   spark.kubernetes.namespace                      {{ jupyterhub_namespace }}
-                  spark.kubernetes.authenticate.serviceAccountName spark-editor
+                  spark.kubernetes.authenticate.driver.serviceAccountName spark-editor
                   spark.executor.instances                        {{ spark_executor_instances }}
                   spark.executor.cores                            {{ spark_executor_cores }}
                   spark.executor.memory                           {{ spark_executor_memory }}
-                  spark.kubernetes.executor.podTemplateFile       /home/jovyan/.spark_conf/executor-pod-template.yaml
+                  spark.executor.memoryOverhead                   {{ spark_executor_memory_overhead }}
+                  spark.kubernetes.executor.request.cores          {{ spark_executor_request_cores }}
+                  spark.kubernetes.executor.limit.cores            {{ spark_executor_limit_cores }}
+                  spark.kubernetes.executor.podTemplateFile        /home/jovyan/.spark_conf/executor-pod-template.yaml
+                  spark.kubernetes.executor.podTemplateContainerName spark-kubernetes-executor
+                  spark.kubernetes.driver.pod.name                 ${HOSTNAME}
+                  spark.kubernetes.executor.deleteOnTermination    {{ (spark_executor_delete_on_termination | bool) | ternary('true', 'false') }}
+                  spark.kubernetes.executor.volumes.persistentVolumeClaim.shared-clases.options.claimName {{ jupyter_shared_clases_pvc }}
+                  spark.kubernetes.executor.volumes.persistentVolumeClaim.shared-clases.mount.path /home/jovyan/Clases
+                  spark.kubernetes.executor.volumes.persistentVolumeClaim.shared-clases.mount.readOnly false
+                  spark.kubernetes.executor.volumes.persistentVolumeClaim.shared-comunidad.options.claimName {{ jupyter_shared_comunidad_pvc }}
+                  spark.kubernetes.executor.volumes.persistentVolumeClaim.shared-comunidad.mount.path /home/jovyan/Comunidad
+                  spark.kubernetes.executor.volumes.persistentVolumeClaim.shared-comunidad.mount.readOnly false
+                  spark.kubernetes.executor.volumes.persistentVolumeClaim.shared-repositorio.options.claimName {{ jupyter_shared_repositorio_pvc }}
+                  spark.kubernetes.executor.volumes.persistentVolumeClaim.shared-repositorio.mount.path /home/jovyan/Repositorio
+                  spark.kubernetes.executor.volumes.persistentVolumeClaim.shared-repositorio.mount.readOnly false
                   spark.driver.host                               ${POD_IP}
                   spark.driver.bindAddress                        0.0.0.0
                   spark.driver.port                               7077
@@ -196,24 +241,35 @@ singleuser:
                   kind: Pod
                   spec:
                     containers:
-                    - name: spark-kubernetes-executor
-                      command: ["/bin/bash", "-c", "exec /usr/local/spark/bin/spark-class org.apache.spark.executor.CoarseGrainedExecutorBackend --driver-url $SPARK_DRIVER_URL --executor-id $SPARK_EXECUTOR_ID --cores $SPARK_EXECUTOR_CORES --app-id $SPARK_APPLICATION_ID --hostname $SPARK_EXECUTOR_POD_IP --resourceProfileId $SPARK_RESOURCE_PROFILE_ID"]
+                      - name: spark-kubernetes-executor
+                        command:
+                          - /bin/bash
+                          - -c
+                          - exec /usr/local/spark/bin/spark-class org.apache.spark.executor.CoarseGrainedExecutorBackend --driver-url ${SPARK_DRIVER_URL} --executor-id ${SPARK_EXECUTOR_ID} --cores ${SPARK_EXECUTOR_CORES} --app-id ${SPARK_APPLICATION_ID} --hostname ${SPARK_EXECUTOR_POD_IP} --resourceProfileId ${SPARK_RESOURCE_PROFILE_ID}
                   PODEOF
         volumes:
-          - name: nfs-clases
-            nfs: { server: {{ nd1_ip }}, path: {{ nfs_base_path }}/clases }
-          - name: nfs-comunidad
-            nfs: { server: {{ nd1_ip }}, path: {{ nfs_base_path }}/comunidad }
-          - name: nfs-repositorio
-            nfs: { server: {{ nd1_ip }}, path: {{ nfs_base_path }}/repositorio }
+          - name: volume-{username}
+            persistentVolumeClaim:
+              claimName: claim-{username}
+          - name: shared-clases
+            persistentVolumeClaim:
+              claimName: {{ jupyter_shared_clases_pvc }}
+          - name: shared-comunidad
+            persistentVolumeClaim:
+              claimName: {{ jupyter_shared_comunidad_pvc }}
+          - name: shared-repositorio
+            persistentVolumeClaim:
+              claimName: {{ jupyter_shared_repositorio_pvc }}
         volume_mounts:
-          - name: nfs-clases
+          - name: volume-{username}
+            mountPath: /home/jovyan
+          - name: shared-clases
             mountPath: /home/jovyan/Clases
             readOnly: false
-          - name: nfs-comunidad
+          - name: shared-comunidad
             mountPath: /home/jovyan/Comunidad
             readOnly: false
-          - name: nfs-repositorio
+          - name: shared-repositorio
             mountPath: /home/jovyan/Repositorio
             readOnly: false
 
@@ -229,6 +285,7 @@ singleuser:
         cpu_guarantee: 1
         mem_limit: "12G"
         mem_guarantee: "1G"
+        storage_pvc_ensure: true
         storage_capacity: "5Gi"
         storage_class: {{ storage_class_name }}
         storage_access_modes: ["ReadWriteOnce"]
@@ -246,11 +303,26 @@ singleuser:
                   spark.master                                    k8s://https://kubernetes.default.svc:443
                   spark.kubernetes.container.image                quay.io/jupyter/all-spark-notebook:{{ spark_image_tag }}
                   spark.kubernetes.namespace                      {{ jupyterhub_namespace }}
-                  spark.kubernetes.authenticate.serviceAccountName spark-editor
+                  spark.kubernetes.authenticate.driver.serviceAccountName spark-editor
                   spark.executor.instances                        {{ spark_executor_instances }}
                   spark.executor.cores                            {{ spark_executor_cores }}
                   spark.executor.memory                           {{ spark_executor_memory }}
-                  spark.kubernetes.executor.podTemplateFile       /home/jovyan/.spark_conf/executor-pod-template.yaml
+                  spark.executor.memoryOverhead                   {{ spark_executor_memory_overhead }}
+                  spark.kubernetes.executor.request.cores          {{ spark_executor_request_cores }}
+                  spark.kubernetes.executor.limit.cores            {{ spark_executor_limit_cores }}
+                  spark.kubernetes.executor.podTemplateFile        /home/jovyan/.spark_conf/executor-pod-template.yaml
+                  spark.kubernetes.executor.podTemplateContainerName spark-kubernetes-executor
+                  spark.kubernetes.driver.pod.name                 ${HOSTNAME}
+                  spark.kubernetes.executor.deleteOnTermination    {{ (spark_executor_delete_on_termination | bool) | ternary('true', 'false') }}
+                  spark.kubernetes.executor.volumes.persistentVolumeClaim.shared-clases.options.claimName {{ jupyter_shared_clases_pvc }}
+                  spark.kubernetes.executor.volumes.persistentVolumeClaim.shared-clases.mount.path /home/jovyan/Clases
+                  spark.kubernetes.executor.volumes.persistentVolumeClaim.shared-clases.mount.readOnly false
+                  spark.kubernetes.executor.volumes.persistentVolumeClaim.shared-comunidad.options.claimName {{ jupyter_shared_comunidad_pvc }}
+                  spark.kubernetes.executor.volumes.persistentVolumeClaim.shared-comunidad.mount.path /home/jovyan/Comunidad
+                  spark.kubernetes.executor.volumes.persistentVolumeClaim.shared-comunidad.mount.readOnly false
+                  spark.kubernetes.executor.volumes.persistentVolumeClaim.shared-repositorio.options.claimName {{ jupyter_shared_repositorio_pvc }}
+                  spark.kubernetes.executor.volumes.persistentVolumeClaim.shared-repositorio.mount.path /home/jovyan/Repositorio
+                  spark.kubernetes.executor.volumes.persistentVolumeClaim.shared-repositorio.mount.readOnly false
                   spark.driver.host                               ${POD_IP}
                   spark.driver.bindAddress                        0.0.0.0
                   spark.driver.port                               7077
@@ -261,32 +333,43 @@ singleuser:
                   kind: Pod
                   spec:
                     containers:
-                    - name: spark-kubernetes-executor
-                      command: ["/bin/bash", "-c", "exec /usr/local/spark/bin/spark-class org.apache.spark.executor.CoarseGrainedExecutorBackend --driver-url $SPARK_DRIVER_URL --executor-id $SPARK_EXECUTOR_ID --cores $SPARK_EXECUTOR_CORES --app-id $SPARK_APPLICATION_ID --hostname $SPARK_EXECUTOR_POD_IP --resourceProfileId $SPARK_RESOURCE_PROFILE_ID"]
+                      - name: spark-kubernetes-executor
+                        command:
+                          - /bin/bash
+                          - -c
+                          - exec /usr/local/spark/bin/spark-class org.apache.spark.executor.CoarseGrainedExecutorBackend --driver-url ${SPARK_DRIVER_URL} --executor-id ${SPARK_EXECUTOR_ID} --cores ${SPARK_EXECUTOR_CORES} --app-id ${SPARK_APPLICATION_ID} --hostname ${SPARK_EXECUTOR_POD_IP} --resourceProfileId ${SPARK_RESOURCE_PROFILE_ID}
                   PODEOF
         volumes:
-          - name: nfs-clases
-            nfs: { server: {{ nd1_ip }}, path: {{ nfs_base_path }}/clases }
-          - name: nfs-comunidad
-            nfs: { server: {{ nd1_ip }}, path: {{ nfs_base_path }}/comunidad }
-          - name: nfs-repositorio
-            nfs: { server: {{ nd1_ip }}, path: {{ nfs_base_path }}/repositorio }
+          - name: volume-{username}
+            persistentVolumeClaim:
+              claimName: claim-{username}
+          - name: shared-clases
+            persistentVolumeClaim:
+              claimName: {{ jupyter_shared_clases_pvc }}
+          - name: shared-comunidad
+            persistentVolumeClaim:
+              claimName: {{ jupyter_shared_comunidad_pvc }}
+          - name: shared-repositorio
+            persistentVolumeClaim:
+              claimName: {{ jupyter_shared_repositorio_pvc }}
         volume_mounts:
-          - name: nfs-clases
+          - name: volume-{username}
+            mountPath: /home/jovyan
+          - name: shared-clases
             mountPath: /home/jovyan/Clases
             readOnly: false
-          - name: nfs-comunidad
+          - name: shared-comunidad
             mountPath: /home/jovyan/Comunidad
             readOnly: false
-          - name: nfs-repositorio
+          - name: shared-repositorio
             mountPath: /home/jovyan/Repositorio
             readOnly: false
 
 hub:
-  baseUrl: /hub/
+  baseUrl: /
   config:
     JupyterHub:
-      authenticator_class: native
+      authenticator_class: nativeauthenticator.NativeAuthenticator
       load_groups:
         invitados: []
         comunidad: []
@@ -294,6 +377,14 @@ hub:
     Authenticator:
       admin_users:
         - {{ jupyterhub_admin_user }}
+      allowed_users:
+{% set allowlist_users = lookup('file', allowlist_path | default(playbook_dir + '/../files/allowlist.txt')).splitlines() %}
+{% for user in ([jupyterhub_admin_user] + allowlist_users) | map('trim') | map('lower') | unique %}
+{% if user %}
+        - {{ user }}
+{% endif %}
+{% endfor %}
+      allow_existing_users: false
     NativeAuthenticator:
       enable_signup: true
       open_signup: true
@@ -316,31 +407,6 @@ hub:
         {{ lookup('file', allowlist_path | default(playbook_dir + '/../files/allowlist.txt')) | indent(8) }}
 
   extraConfig:
-    passwords: |
-      c.NativeAuthenticator.admin_password = "{{ jupyterhub_admin_pass }}"
-
-    authenticator-master-filter: |
-      import os
-
-      def load_allowlist():
-          path = '/etc/jupyterhub/allowlist.txt'
-          allowed = set()
-
-          if os.path.exists(path):
-              with open(path, 'r') as f:
-                  for line in f:
-                      user = line.strip().lower()
-                      if user:
-                          allowed.add(user)
-
-          main_admin = "{{ jupyterhub_admin_user }}".lower()
-          if main_admin:
-              allowed.add(main_admin)
-
-          return allowed
-
-      c.Authenticator.allowed_users = load_allowlist()
-
     logic-grupos: |
       config_profile_list = c.KubeSpawner.profile_list
 
@@ -388,7 +454,8 @@ prePuller:
 
 cull:
   enabled: true
-  users: true
+  users: false     # No borrar usuarios de la DB; NativeAuthenticator guarda ahí credenciales
+  adminUsers: false
   timeout: 1800    # 30 minutos de inactividad máxima
   maxAge: 43200    # 12 horas de vida máxima por sesión
   every: 600

@@ -1,7 +1,7 @@
 
 # KRNEL Engine: Academic PaaS for Distributed Research
 
-**KRNEL Engine** is an Infrastructure-as-Code (IaC) framework based on Ansible, designed to deploy and manage a production-ready **bare-metal K3s cluster** featuring JupyterHub and Apache Spark. It is specifically tailored for the **MRKOV Cluster** (compatibility with different hardware architectures is not fully guaranteed).
+**KRNEL Engine** is an Infrastructure-as-Code (IaC) framework based on Ansible, designed to deploy and manage a production-ready **bare-metal K3s cluster** featuring JupyterHub and Apache Spark. It is specifically tailored for the **MRKOV Cluster** (compatibility with different hardware architectures is not fully guaranteed for now).
 
 > **Status:** 🛠️ *Active Development - Alpha Stage.* This project focuses on solving the gap between hardware resource management and academic research accessibility.
 
@@ -10,26 +10,20 @@
 The automated deployment provisions a full-stack environment, including:
 
 * **Network Security:** Firewall configuration via `ufw`.
-* **Storage:** Automated NFS server deployment and provisioning for `StorageClasses`.
+* **Storage:** **Longhorn** distributed block storage as the default `StorageClass`; legacy NFS playbooks are kept only under `playbooks/old/`.
 * **Orchestration:** Multi-node lightweight Kubernetes (**K3s**) deployment.
 * **Data Processing:** **Apache Spark** integration (utilizing the `all-spark` JupyterHub image).
 * **Observability:** Full monitoring stack with **Grafana** and **Victoria Metrics**.
-* **Ingress & Routing:** High-performance routing using **Nginx**.
+* **Ingress & Routing:** K3s/Traefik routing for public services and local-only NodePort access for administrative panels.
 
 ### 👥 JupyterHub Ecosystem
 
 Within the JupyterHub portal, the platform is pre-configured with:
 
-* **Authentication:** Native auth backed by a user whitelist filter.
-* **Role-Based Access Control (RBAC):**
-* *Guests:* Ephemeral storage.
-* *Students:* Persistent storage.
-* *Professors:* Persistent storage + write-access repository for class materials.
-* *Admin:* Full administrative privileges.
-
-
-* **Compute Integration:** Spark pre-configured to utilize cluster resources directly from Jupyter notebooks.
-* **Shared Storage:** NFS-backed user repositories, including folders for classes, datasets, and a general-purpose workspace.
+* **Authentication:** NativeAuthenticator with an allowlist-driven admission flow.
+* **Role-Based Access Control (RBAC):** guests use ephemeral storage; students, professors, and admins use persistent profiles with different resource and shared-folder access policies.
+* **Compute Integration:** Spark on Kubernetes pre-configured to launch executor pods from Jupyter notebooks.
+* **Shared Storage:** Longhorn-backed shared PVCs for `Clases`, `Comunidad`, and `Repositorio`.
 
 ---
 
@@ -38,7 +32,16 @@ Within the JupyterHub portal, the platform is pre-configured with:
 Ensure you have **[uv](https://github.com/astral-sh/uv)** installed, an extremely fast Python package and environment manager.
 
 ---
+<!--
+## 0. Infrastructure
 
+This repository is specifically tailored for the **MRKOV Cluster**; however, you can try deploying it if your infrastructure is similar:
+
+   - More than 3 x86_64 desktop computers connected via LAN, preferably on the same switch.
+   - One master node.
+
+---
+-->
 ## 1. Environment Setup
 
 First, create your virtual environment using `uv` with the recommended Python version (3.12):
@@ -129,7 +132,7 @@ openssl rand -hex 32
 
 *(The first time you use ansible-vault, it will prompt you to create a master password. Make sure to remember it, as you will need it to run the playbooks).*
 
-3. Copy the resulting encrypted block (starting with `!vault |`) and paste it into your `all.yml` file under the corresponding variables (e.g., `proxy_token` and `jupyterhub_admin_pass`).
+3. Copy the resulting encrypted block (starting with `!vault |`) and paste it into your `all.yml` file under `proxy_token`. With NativeAuthenticator, the admin user signs up once with the username configured in `jupyterhub_admin_user`.
 
 ---
 
@@ -143,12 +146,33 @@ To apply the configuration to your nodes, execute the provided playbooks, pointi
 # Example: K3s Base Installation
 ansible-playbook -i inventories/mrkov playbooks/01-k3s-install.yml --ask-vault-pass --ask-become-pass
 
+# Example: Longhorn Storage
+ansible-playbook -i inventories/mrkov playbooks/03-longhorn.yml --ask-vault-pass --ask-become-pass
+
 # Example: JupyterHub Deployment
 ansible-playbook -i inventories/mrkov playbooks/05-jupyterhub.yml --ask-vault-pass --ask-become-pass
 
 ```
 
 **(Ensure you execute the playbooks in the correct numerical order as named in the `playbooks/` directory).**
+
+Current main sequence:
+
+```text
+00-system-prep.yml
+01-k3s-install.yml
+02-helm-certmgr.yml
+03-longhorn.yml
+04-monitoring.yml
+05-jupyterhub.yml
+06-landing-page.yml
+```
+
+For a full run, use:
+
+```bash
+ansible-playbook -i inventories/mrkov playbooks/site.yml --ask-vault-pass --ask-become-pass
+```
 
 ---
 
@@ -163,6 +187,19 @@ ansible-playbook -i inventories/mrkov playbooks/utils/uninstall-monitoring.yml -
 
 ```
 
+
+### Accessing Longhorn Panel
+
+Create SSH tunnel:
+
+```bash
+ssh -L 30090:localhost:30090 ansible@nd-1
+
+```
+
+Then open `http://localhost:30090` in your browser.
+
+
 ### Accessing Grafana
 
 To access Grafana dashboards, retrieve the default `admin` password:
@@ -172,19 +209,25 @@ kubectl get secret --namespace monitoring mrkovmonitor-grafana -o jsonpath="{.da
 
 ```
 
-Log in using the `admin` user and the retrieved password at: `http://<node_ip>:<victoria_metrics_port>`
+Log in using the `admin` user and the retrieved password. In the MRKOV routing layout, monitoring is exposed under the MRKOV portal domain (for example, `https://mrkov.abdz.dev/grafana/`).
 
 ### Accessing JupyterHub
 
-Before general use, log in with the administrator credentials defined in your global variables to initialize the system. Afterward, standard login procedures apply.
+JupyterHub is exposed as the primary app for the configured Jupyter domain (for example, `https://jupyter.abdz.dev/`). With NativeAuthenticator, the administrator account must sign up once using the username configured in `jupyterhub_admin_user`; afterward, standard login procedures apply.
 
 ### Utilities
 
 Utility playbooks are located in the `playbooks/utils` directory and can be executed similarly to main playbooks:
 
 ```bash
-# Restart JupyterHub Services
-ansible-playbook -i inventories/mrkov playbooks/utils/restart-jupyterhub.yml --ask-become-pass --ask-vault-pass
+# Re-apply JupyterHub configuration only
+ansible-playbook -i inventories/mrkov playbooks/05-jupyterhub.yml --tags update --ask-become-pass --ask-vault-pass
+
+# Seed example notebooks/files into the Longhorn shared PVCs
+ansible-playbook -i inventories/mrkov playbooks/utils/seed-examples.yml --ask-become-pass --ask-vault-pass
+
+# Diagnose Spark/Kubernetes executor infrastructure
+ansible-playbook -i inventories/mrkov playbooks/utils/diagnose-spark-infra.yml --ask-become-pass --ask-vault-pass
 
 ```
 
@@ -194,9 +237,9 @@ ansible-playbook -i inventories/mrkov playbooks/utils/restart-jupyterhub.yml --a
 
 As an active project, we are currently addressing the following bottlenecks:
 
-* [ ] **Storage Consistency:** Resolving intermittent persistent storage (PVC) operational inconsistencies.
-* [ ] **Session Persistence:** Addressing user access drops in JupyterHub over extended periods.
-* [ ] **Spark Resource Allocation:** Stabilizing dynamic resource requests for Spark executors beyond default limits.
+* [ ] **Content Governance:** Evaluate a dedicated content-management service (for example File Browser) so shared folders can stay read-only inside JupyterHub.
+* [ ] **Identity at Scale:** Evaluate OIDC/LDAP integration, preferably Microsoft Entra if institutional approval becomes available.
+* [ ] **Spark Resource Profiles:** Continue tuning demo and production Spark executor presets for classroom workloads.
 
 ---
 
@@ -210,6 +253,7 @@ As an active project, we are currently addressing the following bottlenecks:
 * [ ] Migration from SQLite to **PostgreSQL** for JupyterHub state management.
 * [ ] Deployment of PostgreSQL as an internal cluster service for users.
 * [ ] Integration of **MinIO** for S3-compatible object storage.
+* [ ] Optional File Browser/Nextcloud-style content portal for professor-managed course materials and datasets.
 * [ ] Implementation of a strict GitOps workflow (testing on `develop` branch prior to production deployment).
 * [ ] Hardware acceleration integration (**GPU Support**).
 

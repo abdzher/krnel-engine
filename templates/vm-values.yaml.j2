@@ -30,11 +30,11 @@ grafana:
     annotations:
       kubernetes.io/ingress.class: traefik
     hosts:
-      - "{{ jupyterhub_domain }}"
+      - "{{ mrkov_domain }}"
     path: /grafana
   grafana.ini:
     server:
-      domain: "{{ jupyterhub_domain }}"
+      domain: "{{ mrkov_domain }}"
       root_url: "%(protocol)s://%(domain)s/grafana"
       serve_from_sub_path: true
 

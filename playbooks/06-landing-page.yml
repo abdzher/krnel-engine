@@ -1,7 +1,7 @@
 ---
 # =============================================================================
 # KRNEL — playbooks/06-landing-page.yml
-# Despliega el portal central (Landing Page) expuesto en la raíz del dominio
+# Despliega el portal central (Landing Page) expuesto en la raíz de mrkov_domain
 # a través de Traefik. Sirve como índice para JupyterHub y Grafana.
 # =============================================================================
 
@@ -101,7 +101,7 @@
               kubernetes.io/ingress.class: traefik
           spec:
             rules:
-              - host: "{{ jupyterhub_domain }}"
+              - host: "{{ mrkov_domain }}"
                 http:
                   paths:
                     - path: /
