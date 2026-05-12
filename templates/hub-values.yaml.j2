@@ -38,7 +38,7 @@ singleuser:
 
   # ---------------------------------------------------------------------------
   # NetworkPolicy — Spark on K8s requiere:
-  #   1. Egress a IPs privadas (API Server, NFS, comunicación inter-pod)
+  #   1. Egress a IPs privadas (API Server, Longhorn RWX, comunicación inter-pod)
   #   2. Ingress desde executor pods (para que conecten de vuelta al driver)
   # ---------------------------------------------------------------------------
   networkPolicy:
@@ -130,7 +130,7 @@ singleuser:
                   spark.kubernetes.executor.podTemplateFile        /home/jovyan/.spark_conf/executor-pod-template.yaml
                   spark.kubernetes.executor.podTemplateContainerName spark-kubernetes-executor
                   spark.kubernetes.driver.pod.name                 ${HOSTNAME}
-                  spark.kubernetes.executor.deleteOnTermination    {{ (spark_executor_delete_on_termination | bool) | ternary('true', 'false') }}
+                  spark.kubernetes.executor.deleteOnTermination    true
                   spark.kubernetes.executor.volumes.persistentVolumeClaim.shared-clases.options.claimName {{ jupyter_shared_clases_pvc }}
                   spark.kubernetes.executor.volumes.persistentVolumeClaim.shared-clases.mount.path /home/jovyan/Clases
                   spark.kubernetes.executor.volumes.persistentVolumeClaim.shared-clases.mount.readOnly true
@@ -221,7 +221,7 @@ singleuser:
                   spark.kubernetes.executor.podTemplateFile        /home/jovyan/.spark_conf/executor-pod-template.yaml
                   spark.kubernetes.executor.podTemplateContainerName spark-kubernetes-executor
                   spark.kubernetes.driver.pod.name                 ${HOSTNAME}
-                  spark.kubernetes.executor.deleteOnTermination    {{ (spark_executor_delete_on_termination | bool) | ternary('true', 'false') }}
+                  spark.kubernetes.executor.deleteOnTermination    true
                   spark.kubernetes.executor.volumes.persistentVolumeClaim.shared-clases.options.claimName {{ jupyter_shared_clases_pvc }}
                   spark.kubernetes.executor.volumes.persistentVolumeClaim.shared-clases.mount.path /home/jovyan/Clases
                   spark.kubernetes.executor.volumes.persistentVolumeClaim.shared-clases.mount.readOnly false
@@ -313,7 +313,7 @@ singleuser:
                   spark.kubernetes.executor.podTemplateFile        /home/jovyan/.spark_conf/executor-pod-template.yaml
                   spark.kubernetes.executor.podTemplateContainerName spark-kubernetes-executor
                   spark.kubernetes.driver.pod.name                 ${HOSTNAME}
-                  spark.kubernetes.executor.deleteOnTermination    {{ (spark_executor_delete_on_termination | bool) | ternary('true', 'false') }}
+                  spark.kubernetes.executor.deleteOnTermination    true
                   spark.kubernetes.executor.volumes.persistentVolumeClaim.shared-clases.options.claimName {{ jupyter_shared_clases_pvc }}
                   spark.kubernetes.executor.volumes.persistentVolumeClaim.shared-clases.mount.path /home/jovyan/Clases
                   spark.kubernetes.executor.volumes.persistentVolumeClaim.shared-clases.mount.readOnly false

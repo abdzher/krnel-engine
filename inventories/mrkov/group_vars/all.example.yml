@@ -129,7 +129,6 @@ spark_executor_request_cores: "500m"
 spark_executor_limit_cores:   "1"
 spark_executor_memory:    "2g"  # RAM por executor
 spark_executor_memory_overhead: "512m"
-spark_executor_delete_on_termination: false  # Mantener pods fallidos mientras estabilizamos Spark
 
 # -----------------------------------------------------------------------------
 # ResourceQuota del namespace jupyter
@@ -141,7 +140,7 @@ spark_executor_delete_on_termination: false  # Mantener pods fallidos mientras e
 #   Recursos usables por nodo (estimado ~75% del hardware):
 #     cpu_usable_per_node    × 3 workers = quota_cpu_total
 #     memory_usable_per_node × 3 workers = quota_memory_total
-#   Reservar ~20% para pods del sistema (k3s, NFS provisioner, etc.)
+#   Reservar ~20% para pods del sistema (k3s, Longhorn, monitoreo, etc.)
 # -----------------------------------------------------------------------------
 jupyter_quota_pods:            "30"    # máx pods simultáneos en namespace
 jupyter_quota_cpu_requests:    "18"    # suma de cpu requests de todos los pods

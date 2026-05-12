@@ -1,8 +1,7 @@
 ---
 # =============================================================================
-# KRNEL — playbooks/utils/seed-nfs-examples.yml
-# DEPRECADO el backend NFS: este utilitario ahora siembra los ejemplos en los
-# PVCs compartidos RWX de JupyterHub sobre Longhorn.
+# KRNEL — playbooks/utils/seed-examples.yml
+# Siembra los ejemplos en los PVCs compartidos RWX de JupyterHub sobre Longhorn.
 #
 # Copias realizadas:
 #   examples/comunity/  -> PVC {{ jupyter_shared_comunidad_pvc }}
