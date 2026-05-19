@@ -160,13 +160,10 @@ jupyter_limit_pod_memory_max:             "12Gi"
 # -----------------------------------------------------------------------------
 # [VAULT] Credenciales — NUNCA en texto plano en Git
 # -----------------------------------------------------------------------------
-# Generar proxy_token con: openssl rand -hex 32
-# jupyterhub_admin_pass queda legado; NativeAuthenticator requiere signup inicial
-# del usuario definido en jupyterhub_admin_user.
-proxy_token:            !vault |
-          $ANSIBLE_VAULT...REEMPLAZAR_CON_ANSIBLE_VAULT
-jupyterhub_admin_pass:  !vault |
-          $ANSIBLE_VAULT...REEMPLAZAR_CON_ANSIBLE_VAULT
+# Generar proxy_token con: openssl rand -hex 32, copiar resultado 
+# (eliminar comillas)
+proxy_token:            "!vault |
+          $ANSIBLE_VAULT...REEMPLAZAR_CON_ANSIBLE_VAULT"
 
 # -----------------------------------------------------------------------------
 # Control de comportamiento de playbooks

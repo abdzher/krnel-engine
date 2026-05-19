@@ -1,0 +1,13 @@
+r-irkernel
+r-tidyverse
+r-broom
+r-modelr
+r-car
+r-lmtest
+r-sandwich
+r-mass
+r-lme4
+r-glmnet
+r-boot
+r-rsample
+r-infer

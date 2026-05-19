@@ -4,7 +4,7 @@
 # Siembra los ejemplos en los PVCs compartidos RWX de JupyterHub sobre Longhorn.
 #
 # Copias realizadas:
-#   examples/comunity/  -> PVC {{ jupyter_shared_comunidad_pvc }}
+#   examples/community/  -> PVC {{ jupyter_shared_comunidad_pvc }}
 #   examples/academic/  -> PVC {{ jupyter_shared_clases_pvc }}
 #   examples/general/   -> PVC {{ jupyter_shared_repositorio_pvc }}
 # =============================================================================
@@ -26,7 +26,7 @@
       register: seed_example_dirs
       delegate_to: localhost
       loop:
-        - "{{ playbook_dir }}/../../examples/comunity"
+        - "{{ playbook_dir }}/../../examples/community"
         - "{{ playbook_dir }}/../../examples/academic"
         - "{{ playbook_dir }}/../../examples/general"
 
@@ -78,7 +78,7 @@
 
     - name: Copiar ejemplos de Comunidad al master
       ansible.builtin.copy:
-        src: "{{ playbook_dir }}/../../examples/comunity/"
+        src: "{{ playbook_dir }}/../../examples/community/"
         dest: "{{ seed_remote_base }}/comunidad/"
         mode: "0644"
         directory_mode: "0755"
