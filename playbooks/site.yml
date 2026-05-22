@@ -12,7 +12,6 @@
 #   k3s             → 01-k3s-install  (Control Plane + Agents)
 #   helm, certmgr   → 02-helm-certmgr (Helm binary + Cert-Manager)
 #   longhorn        → 03-longhorn     (StorageClass HA por defecto)
-#   nfs             → 03-nfs-setup    (DEPRECADO: NFS legado, no corre en site.yml)
 #   monitoring, vm  → 04-monitoring   (VictoriaMetrics stack)
 #   jupyter         → 05-jupyterhub   (JupyterHub)
 #   landing         → 06-landing-page (portal MRKOV)

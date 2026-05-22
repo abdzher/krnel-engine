@@ -42,17 +42,6 @@ longhorn_version:     "1.11.2"
 # Formato:    sha256:<hash>
 helm_checksum: "sha256:REEMPLAZAR_CON_CHECKSUM_SHA256_DE_helm-v3.17.3-linux-amd64.tar.gz"
 
-# -----------------------------------------------------------------------------
-# NFS
-# -----------------------------------------------------------------------------
-nfs_server_ip: "{{ nd1_ip }}"
-nfs_base_path: "/srv/nfs"
-nfs_shares:
-  - jupyter-data    # Share legado; los PVCs dinámicos usan Longhorn
-  - comunidad       # Carpeta compartida de escritura para alumnos
-  - clases          # Carpeta de solo lectura para alumnos, escritura para profesores
-  - repositorio     # Datasets y recursos de solo lectura general
-
 # StorageClass por defecto para PVCs dinámicos del clúster.
 storage_class_name: "longhorn"
 
@@ -77,13 +66,6 @@ jupyter_shared_repositorio_pvc: "jupyter-shared-repositorio"
 jupyter_shared_clases_size:     "20Gi"
 jupyter_shared_comunidad_size:  "50Gi"
 jupyter_shared_repositorio_size: "100Gi"
-
-# -----------------------------------------------------------------------------
-# NFS legado / carpetas compartidas
-# -----------------------------------------------------------------------------
-# DEPRECADO: usar solo para migración o rollback. El flujo principal usa Longhorn.
-nfs_provisioner_enabled: false
-nfs_storage_class_name: "nfs-master"
 
 # Kubeconfig en el nodo master (usado por módulos kubernetes.core)
 k8s_kubeconfig: "/home/ansible/.kube/config"

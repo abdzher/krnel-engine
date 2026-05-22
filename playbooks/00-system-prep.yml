@@ -46,7 +46,6 @@
         name:
           - open-iscsi
           - util-linux
-          - nfs-common
         state: present
 
     - name: Asegurar que iscsid está habilitado y corriendo

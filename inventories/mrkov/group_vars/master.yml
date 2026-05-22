@@ -1,7 +1,7 @@
 ---
 # =============================================================================
 # KRNEL — group_vars/master.yml
-# Variables específicas del nodo master (nd-1): Control Plane k3s + servidor NFS.
+# Variables específicas del nodo master (nd-1): Control Plane k3s.
 # =============================================================================
 
 # --- xanmanning.k3s role ---
@@ -14,5 +14,3 @@ k3s_server:
   service-cidr:         "{{ k3s_service_cidr }}"
   write-kubeconfig-mode: "644"
 
-# Este nodo actúa también como servidor NFS
-is_nfs_server: true
