@@ -1,0 +1,40 @@
+# ==============================================================================
+# KRNEL — templates/jupyterhub-vmrule.yaml.j2
+# Reglas de alertamiento propias de JupyterHub — Fase 8.
+#
+# El `defaultRules` del chart victoria-metrics-k8s-stack (vm-values.yaml.j2)
+# solo cubre componentes genéricos de Kubernetes/VictoriaMetrics — nunca las
+# métricas de aplicación que expone /hub/metrics
+# (templates/jupyterhub-vmservicescrape.yaml.j2). Sin este VMRule, esas
+# métricas quedan visibles en Grafana pero nadie recibe alerta si el Hub cae.
+#
+# Deliberadamente corto: solo se agrega lo que se puede justificar con datos
+# confirmados en vivo (ver tmp/auditoria-hardening.md, Fase 8) — evita repetir
+# el episodio de bandeja saturada de la Fase 4/7 con reglas mal calibradas
+# sobre métricas que no se confirmó que existan o tengan un umbral sensato.
+#
+# Renderizado por Ansible — NO editar directamente en el servidor
+# ==============================================================================
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+metadata:
+  name: jupyterhub-hub-alerts
+  namespace: {{ jupyterhub_namespace }}
+  labels:
+    app.kubernetes.io/part-of: jupyterhub
+    app.kubernetes.io/component: hub-alerts
+spec:
+  groups:
+    - name: jupyterhub.rules
+      rules:
+        - alert: JupyterHubDown
+          expr: up{job="hub"} == 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "JupyterHub (Hub) no responde"
+            description: >-
+              El target de scrape del pod hub (job="hub") lleva 5 minutos sin
+              responder. Revisa `kubectl get pods -n jupyter` y
+              `kubectl logs -n jupyter deploy/hub`.

@@ -360,6 +360,56 @@
               JupyterHub no quedó disponible dentro del timeout. Revisa los pods
               y eventos mostrados arriba en el namespace '{{ jupyterhub_namespace }}'.
 
+    # -------------------------------------------------------------------------
+    # Fase 8 — VMServiceScrape para /hub/metrics (observabilidad de aplicación,
+    # no solo de infraestructura genérica). Requiere authenticate_prometheus:
+    # false en hub-values.yaml.j2 (ver ese archivo) y el CRD VMServiceScrape,
+    # ya instalado por 04-monitoring.yml (corre antes en site.yml).
+    # -------------------------------------------------------------------------
+    - name: Renderizar VMServiceScrape de JupyterHub desde plantilla Jinja2
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../templates/jupyterhub-vmservicescrape.yaml.j2"
+        dest: "/tmp/jupyterhub-vmservicescrape-{{ ansible_facts['date_time']['epoch'] }}.yaml"
+        mode: "0644"
+      register: jupyterhub_vmservicescrape_tmp
+      tags: [update]
+
+    - name: Aplicar VMServiceScrape de JupyterHub al clúster
+      kubernetes.core.k8s:
+        kubeconfig: "{{ k8s_kubeconfig }}"
+        state: present
+        src: "{{ jupyterhub_vmservicescrape_tmp.dest }}"
+      tags: [update]
+
+    - name: Limpiar manifest temporal de VMServiceScrape
+      ansible.builtin.file:
+        path: "{{ jupyterhub_vmservicescrape_tmp.dest }}"
+        state: absent
+      tags: [update]
+      when: jupyterhub_vmservicescrape_tmp.dest is defined
+
+    - name: Renderizar VMRule de alertas de JupyterHub desde plantilla Jinja2
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../templates/jupyterhub-vmrule.yaml.j2"
+        dest: "/tmp/jupyterhub-vmrule-{{ ansible_facts['date_time']['epoch'] }}.yaml"
+        mode: "0644"
+      register: jupyterhub_vmrule_tmp
+      tags: [update]
+
+    - name: Aplicar VMRule de alertas de JupyterHub al clúster
+      kubernetes.core.k8s:
+        kubeconfig: "{{ k8s_kubeconfig }}"
+        state: present
+        src: "{{ jupyterhub_vmrule_tmp.dest }}"
+      tags: [update]
+
+    - name: Limpiar manifest temporal de VMRule
+      ansible.builtin.file:
+        path: "{{ jupyterhub_vmrule_tmp.dest }}"
+        state: absent
+      tags: [update]
+      when: jupyterhub_vmrule_tmp.dest is defined
+
     - name: Confirmar despliegue de JupyterHub
       ansible.builtin.debug:
         msg: >

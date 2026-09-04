@@ -61,6 +61,30 @@
         state: absent
 
     # -------------------------------------------------------------------------
+    # Fase 8 — el VMAlertmanager que generaba el chart antes de fijar
+    # `alertmanager.enabled: false` (Fase 4, ver comentario en vm-values.yaml.j2)
+    # quedó vivo en el clúster tras el cambio, en un loop de reconciliación
+    # cada ~10s ("actual pod count: 0 less than needed: 1") que generaba ruido
+    # constante de alertas (AlertmanagerErrors/ReconcileErrors/TooManyLogs) sin
+    # afectar al VMAlertmanager standalone real. Coincide con un problema
+    # conocido del operador/chart: un finalizer que puede quedar pegado al
+    # deshabilitar un recurso que gestiona
+    # (github.com/VictoriaMetrics/helm-charts/issues/1125). Se limpió a mano
+    # una vez; esta tarea es la red de seguridad para que no pueda volver a
+    # quedar atascado en un futuro upgrade del chart — es un no-op si Helm ya
+    # lo podó correctamente.
+    # -------------------------------------------------------------------------
+    - name: "Fase 8 | Asegurar que no exista el VMAlertmanager huérfano del chart (alertmanager.enabled: false)"
+      kubernetes.core.k8s:
+        kubeconfig: "{{ k8s_kubeconfig }}"
+        api_version: operator.victoriametrics.com/v1beta1
+        kind: VMAlertmanager
+        name: "{{ victoria_metrics_release }}-victoria-metrics-k8s-stack"
+        namespace: "{{ victoria_metrics_namespace }}"
+        state: absent
+      ignore_errors: true  # no debe bloquear el playbook si ya no existe o si el CRD cambia de nombre
+
+    # -------------------------------------------------------------------------
     # Alertmanager standalone (hallazgo E3) — ver comentario largo en
     # vm-values.yaml.j2 y en mrkov-alertmanager.yaml.j2 sobre por qué NO se usa
     # el Alertmanager integrado del chart (nombre demasiado largo, rompe el

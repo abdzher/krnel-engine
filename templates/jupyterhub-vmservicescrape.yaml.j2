@@ -1,0 +1,43 @@
+# ==============================================================================
+# KRNEL — templates/jupyterhub-vmservicescrape.yaml.j2
+# Scrapea el endpoint nativo de métricas de JupyterHub (/hub/metrics) hacia
+# VictoriaMetrics — Fase 8, mejora de observabilidad.
+#
+# Sin este recurso, `jupyter` solo estaba cubierto por señales de
+# infraestructura genéricas (CPU/RAM por pod vía kubelet/cAdvisor, estado de
+# objetos vía kube-state-metrics), que ya son cluster-wide y no necesitan
+# este VMServiceScrape. Lo que faltaba es la métrica de aplicación propia del
+# Hub (usuarios activos, spawns exitosos/fallidos, duración de spawn).
+#
+# El endpoint requiere `authenticate_prometheus: false` en hub-values.yaml.j2
+# (ver ese archivo) porque vmagent no tiene un token de usuario del Hub —
+# decisión aceptada: solo expone contadores agregados, sin datos de
+# estudiantes, y el Service `hub` ya es ClusterIP interno (no expuesto por
+# Ingress).
+#
+# El selector usa las labels reales del Service `hub` del chart jupyterhub
+# (confirmadas en vivo con `kubectl get svc hub -n jupyter --show-labels`),
+# no las del Selector pod-to-service del propio Service (que es otra cosa).
+#
+# Renderizado por Ansible — NO editar directamente en el servidor
+# ==============================================================================
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMServiceScrape
+metadata:
+  name: jupyterhub-hub-metrics
+  namespace: {{ jupyterhub_namespace }}
+  labels:
+    app.kubernetes.io/part-of: jupyterhub
+    app.kubernetes.io/component: hub-metrics
+spec:
+  namespaceSelector:
+    matchNames:
+      - {{ jupyterhub_namespace }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: jupyterhub
+      app.kubernetes.io/component: hub
+  endpoints:
+    - port: hub
+      path: /hub/metrics
+      interval: 30s

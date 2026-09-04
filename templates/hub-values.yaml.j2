@@ -371,6 +371,26 @@ singleuser:
 
 hub:
   baseUrl: /
+  # Fase 8: la NetworkPolicy que trae el chart por omisión para el pod `hub`
+  # solo permite ingreso desde orígenes dentro del propio release
+  # (proxy/singleuser) — confirmado en vivo: vmagent (namespace `monitoring`)
+  # recibía "connection refused" al intentar scrapear /hub/metrics, aunque el
+  # Hub respondía 200 en localhost. Se agrega una regla explícita, acotada
+  # solo al pod de vmagent (no a todo el namespace monitoring) y solo al
+  # puerto del hub — el resto de la política (ingress desde proxy/singleuser,
+  # egress, etc.) queda intacta, no se desactiva nada.
+  networkPolicy:
+    ingress:
+      - from:
+          - namespaceSelector:
+              matchLabels:
+                name: monitoring
+            podSelector:
+              matchLabels:
+                app.kubernetes.io/name: vmagent
+        ports:
+          - protocol: TCP
+            port: 8081
   config:
     JupyterHub:
       authenticator_class: nativeauthenticator.NativeAuthenticator
@@ -380,6 +400,14 @@ hub:
       # significa que un admin de JupyterHub NO puede entrar directo al
       # notebook de otro usuario sin pasar por su cuenta.
       admin_access: false
+      # Fase 8: habilita el scraping de /hub/metrics sin token. Decisión
+      # aceptada — ese endpoint solo expone contadores agregados (usuarios
+      # activos, spawns, duración), nunca contenido ni credenciales de
+      # estudiantes, y el Service `hub` ya es ClusterIP interno (no expuesto
+      # por Ingress). vmagent no tiene un token de usuario del Hub para
+      # autenticarse, así que sin esto el VMServiceScrape
+      # (jupyterhub-vmservicescrape.yaml.j2) no podría leer nada.
+      authenticate_prometheus: false
       load_groups:
         invitados: []
         comunidad: []

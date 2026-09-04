@@ -13,7 +13,7 @@ The automated deployment provisions a full-stack environment, including:
 * **Storage:** **Longhorn** distributed block storage as the default `StorageClass`; legacy NFS playbooks are kept only under `playbooks/old/`.
 * **Orchestration:** Multi-node lightweight Kubernetes (**K3s**) deployment.
 * **Data Processing:** **Apache Spark** integration (utilizing the `all-spark` JupyterHub image).
-* **Observability:** Full monitoring stack with **Grafana** and **Victoria Metrics**, with CPU/memory `resources` declared per component so monitoring cannot starve student sessions of shared namespace quota. **Alertmanager** notifies administrators by email when `vmalert`'s rules fire — see "Email Alerting" below.
+* **Observability:** Full monitoring stack with **Grafana** and **Victoria Metrics**, with CPU/memory `resources` declared per component so monitoring cannot starve student sessions of shared namespace quota. **Alertmanager** notifies administrators by email when `vmalert`'s rules fire — see "Email Alerting" below. Coverage isn't just cluster infrastructure (pod CPU/RAM via kubelet, object state via kube-state-metrics, both already cluster-wide): a `VMServiceScrape` also scrapes JupyterHub's own `/hub/metrics` endpoint, so active users, spawn success/failure and spawn duration are visible too, not just the infrastructure underneath.
 * **Ingress & Routing:** K3s/Traefik routing for public services. Administrative panels (Longhorn UI) have no NodePort or Ingress at all — access is `kubectl port-forward` over an SSH/Tailscale tunnel to the master, never a port exposed on the nodes.
 
 ### 👥 JupyterHub Ecosystem
@@ -215,6 +215,17 @@ kubectl get vmalert -n monitoring -o yaml | grep -A3 notifiers
 kubectl get vmalertmanager -n monitoring
 kubectl get pods -n monitoring | grep alertmanager
 ```
+
+**Known leftover-resource bug:** the chart's own (disabled) `VMAlertmanager` — the one that hit the
+63-byte StatefulSet name limit above — can stay behind in the cluster after setting
+`alertmanager.enabled: false`, stuck in a reconcile-error loop (`"actual pod count: 0 less than
+needed: 1"` every ~10s in `mrkov*-victoria-metrics-operator` logs) that fires
+`AlertmanagerErrors`/`ReconcileErrors`/`TooManyLogs` even though the standalone `mrkov-alerts`
+Alertmanager is healthy. This matches a [known operator/chart finalizer
+issue](https://github.com/VictoriaMetrics/helm-charts/issues/1125). `04-monitoring.yml` now runs an
+idempotent cleanup task after every Helm upgrade that deletes that leftover resource by name if
+Helm's own pruning didn't catch it — no manual action should be needed, but if the noise ever
+returns, `kubectl get vmalertmanager -n monitoring` should show only `mrkov-alerts`.
 
 ### Webhook Validation Errors
 
