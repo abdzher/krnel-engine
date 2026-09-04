@@ -100,11 +100,37 @@
       loop: "{{ cluster_nodes }}"
       when: item.ip != ansible_host
 
-    - name: "UFW | Permitir HTTP (80/tcp) y HTTPS (443/tcp)"
+    # Hallazgo S1: sin `src`, a diferencia de 6443/10250/8472. Confirmado en
+    # vivo (2026-09-03) que jupyterhub_domain/mrkov_domain resuelven a IPs de
+    # Cloudflare, nunca a la IP real del nodo — el Cloudflare Tunnel
+    # (cloudflared) es saliente únicamente, así que el tráfico público real
+    # jamás toca este puerto desde fuera de la LAN. Dejarlo abierto a
+    # cualquier IP solo amplía la superficie para quien descubra la IP real
+    # del nodo y se conecte directo, saltándose el proxy/WAF de Cloudflare.
+    #
+    # UFW identifica reglas por sus parámetros, no por el nombre de la tarea:
+    # sin este borrado explícito, la regla vieja sin `src` sigue activa junto
+    # a la nueva y el hallazgo no se cierra en la práctica.
+    - name: "UFW | Eliminar regla antigua de HTTP/HTTPS sin restricción de origen"
       community.general.ufw:
         rule: allow
         port: "{{ item.port }}"
         proto: "{{ item.proto }}"
+        delete: true
+      loop:
+        - { port: "80",  proto: "tcp" }
+        - { port: "443", proto: "tcp" }
+      register: _ufw_remove_old_http
+      failed_when:
+        - _ufw_remove_old_http is failed
+        - "'not delete non-existent' not in (_ufw_remove_old_http.msg | default(''))"
+
+    - name: "UFW | Permitir HTTP (80/tcp) y HTTPS (443/tcp) — solo LAN"
+      community.general.ufw:
+        rule: allow
+        port: "{{ item.port }}"
+        proto: "{{ item.proto }}"
+        src: "{{ network_segment }}"
       loop:
         - { port: "80",  proto: "tcp" }
         - { port: "443", proto: "tcp" }

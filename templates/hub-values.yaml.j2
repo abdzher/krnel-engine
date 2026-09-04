@@ -28,6 +28,10 @@ singleuser:
   storage:
     type: dynamic
     capacity: 2Gi
+    extraLabels:
+      # Incluye cada PVC personal nuevo en el snapshot recurrente local de
+      # Longhorn desde el momento en que se crea (hallazgo E1 del audit).
+      recurring-job-group.longhorn.io/{{ longhorn_snapshot_group }}: enabled
     dynamic:
       storageClass: {{ storage_class_name }}
       pvcNameTemplate: claim-{username}
@@ -370,6 +374,12 @@ hub:
   config:
     JupyterHub:
       authenticator_class: nativeauthenticator.NativeAuthenticator
+      # Hallazgo S4: no estaba declarado. El default (false) ya era el correcto,
+      # pero por omisión y no por decisión explícita — evita que una futura
+      # actualización del chart cambie el comportamiento en silencio. `false`
+      # significa que un admin de JupyterHub NO puede entrar directo al
+      # notebook de otro usuario sin pasar por su cuenta.
+      admin_access: false
       load_groups:
         invitados: []
         comunidad: []
@@ -378,7 +388,7 @@ hub:
       admin_users:
         - {{ jupyterhub_admin_user }}
       allowed_users:
-{% set allowlist_users = lookup('file', allowlist_path | default(playbook_dir + '/../files/allowlist.txt')).splitlines() %}
+{% set allowlist_users = lookup('file', allowlist_path).splitlines() %}
 {% for user in ([jupyterhub_admin_user] + allowlist_users) | map('trim') | map('lower') | unique %}
 {% if user %}
         - {{ user }}
@@ -404,7 +414,7 @@ hub:
     lista_de_correos:
       mountPath: /etc/jupyterhub/allowlist.txt
       stringData: |
-        {{ lookup('file', allowlist_path | default(playbook_dir + '/../files/allowlist.txt')) | indent(8) }}
+        {{ lookup('file', allowlist_path) | indent(8) }}
 
   extraConfig:
     logic-grupos: |
@@ -450,6 +460,12 @@ scheduling:
 
 prePuller:
   hook:
+    enabled: false
+  # Hallazgo M3: `continuous` no estaba declarado y quedaba en su default
+  # (`true`) — un DaemonSet corriendo en TODOS los nodos sin hacer nada más
+  # que mantener la imagen cacheada, reteniendo cuota (pods/cpu/memory) del
+  # namespace jupyter que ya está ajustada (ver E7/E8). Explícito en false.
+  continuous:
     enabled: false
 
 cull:

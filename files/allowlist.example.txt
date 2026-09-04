@@ -12,3 +12,14 @@
 usuario1@institucion.edu.mx
 usuario2@institucion.edu.mx
 profesor1@institucion.edu.mx
+# ---------------------------------------------------------------------------
+# Cuentas de DEMOSTRACIÓN para tests/demo-concurrencia/ (Playwright).
+# Agregar (sin el '#') sólo si se va a correr la demo de concurrencia.
+# Coinciden con DEMO_USERNAME_TEMPLATE=demo-{n} de esa suite.
+# Alta rápida: tests/demo-concurrencia/scripts/append-allowlist.sh
+# ---------------------------------------------------------------------------
+# demo-01
+# demo-02
+# demo-03
+# demo-04
+# demo-05

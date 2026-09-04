@@ -22,9 +22,34 @@ metadata:
     app.kubernetes.io/part-of: jupyterhub
     app.kubernetes.io/component: spark-rbac
 rules:
+  # Hallazgo S3: el Role original daba create/delete/patch/update sobre
+  # "persistentvolumeclaims", "services" y "configmaps" además de "pods".
+  # Montar un PVC existente por `claimName` (como hacen los profiles de
+  # hub-values.yaml.j2) no requiere NINGÚN verbo sobre el objeto PVC — ese
+  # acceso le permitía a cualquier estudiante con este ServiceAccount
+  # compartido borrar/parchear el PVC de otro estudiante, el hub-db-dir, los
+  # PVCs compartidos o los Services hub/proxy. Se quitó por completo, sin
+  # regresión (probado en vivo).
+  #
+  # "configmaps" SÍ necesita escritura completa — probado en vivo: Spark-on-K8s
+  # crea un ConfigMap de configuración del executor al inicializar el
+  # SparkContext (KubernetesClusterSchedulerBackend.setUpExecutorConfigMap),
+  # antes de lanzar ningún executor. Con solo lectura, SparkSession.getOrCreate()
+  # falla de entrada con "configmaps is forbidden". No es opcional para este
+  # modo de despliegue.
+  #
+  # "services" se mantiene en solo lectura: `spark.driver.host` se fija
+  # explícito a la IP del pod en el postStart de cada profile
+  # (hub-values.yaml.j2), así que el driver no necesita crear un Service para
+  # que los executors lo encuentren. Si una prueba futura muestra lo
+  # contrario ("services is forbidden" en los logs del driver), restaurar
+  # aquí los mismos verbos que configmaps.
   - apiGroups: [""]
-    resources: ["pods", "services", "configmaps", "persistentvolumeclaims"]
+    resources: ["pods", "configmaps"]
     verbs: ["create", "get", "list", "watch", "delete", "deletecollection", "patch", "update"]
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["get", "list", "watch"]
   - apiGroups: [""]
     resources: ["pods/log", "pods/status"]
     verbs: ["get", "list", "watch"]

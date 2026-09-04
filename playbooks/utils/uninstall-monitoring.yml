@@ -2,15 +2,43 @@
 # =============================================================================
 # KRNEL — playbooks/utils/uninstall-monitoring.yml
 # Desinstala el stack de VictoriaMetrics y elimina su namespace asociado.
+# DESTRUCTIVO: borra dashboards, histórico de métricas y alertas. Pide
+# confirmación interactiva salvo que se pase -e confirm_uninstall=true.
 #
-# Uso: 
-#   ansible-playbook -i inventories/mrkov playbooks/utils/uninstall-monitoring.yml -K
+# Uso:
+#   ansible-playbook -i inventories/mrkov playbooks/utils/uninstall-monitoring.yml --ask-vault-pass
+#   ansible-playbook -i inventories/mrkov playbooks/utils/uninstall-monitoring.yml --ask-vault-pass -e confirm_uninstall=true
 # =============================================================================
 
 - name: "UTILIDAD | Desinstalar VictoriaMetrics K8s Stack"
   hosts: master
   become: false
+  vars:
+    confirm_uninstall: false
   tasks:
+    # -------------------------------------------------------------------------
+    # M1 — Antes esto borraba el namespace de monitoreo sin ninguna
+    # confirmación: el workaround documentado para el bug del webhook de
+    # VictoriaMetrics (ver README "Webhook Validation Errors") era en sí mismo
+    # destructivo y sin red de seguridad. `confirm_uninstall: true` permite
+    # seguir usándolo sin interacción (ej. `-e confirm_uninstall=true`).
+    # -------------------------------------------------------------------------
+    - name: Confirmar desinstalación del stack de monitoreo
+      ansible.builtin.pause:
+        prompt: >
+          Esto va a desinstalar VictoriaMetrics/Grafana y BORRAR el namespace
+          '{{ victoria_metrics_namespace }}' completo (dashboards, histórico de
+          métricas, alertas). Escribe 'si' para continuar
+      register: confirm_prompt
+      when: not confirm_uninstall
+
+    - name: Abortar si no se confirmó
+      ansible.builtin.fail:
+        msg: "Cancelado por el operador."
+      when:
+        - not confirm_uninstall
+        - confirm_prompt.user_input | default('') | lower != 'si'
+
     - name: Desinstalar release de Helm de VictoriaMetrics
       kubernetes.core.helm:
         kubeconfig: "{{ k8s_kubeconfig }}"

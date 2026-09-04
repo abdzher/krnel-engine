@@ -7,6 +7,7 @@ metadata:
   labels:
     app.kubernetes.io/part-of: jupyterhub
     app.kubernetes.io/component: shared-storage
+    recurring-job-group.longhorn.io/{{ longhorn_snapshot_group }}: enabled
 spec:
   accessModes:
     - ReadWriteMany
@@ -23,6 +24,7 @@ metadata:
   labels:
     app.kubernetes.io/part-of: jupyterhub
     app.kubernetes.io/component: shared-storage
+    recurring-job-group.longhorn.io/{{ longhorn_snapshot_group }}: enabled
 spec:
   accessModes:
     - ReadWriteMany
@@ -39,6 +41,7 @@ metadata:
   labels:
     app.kubernetes.io/part-of: jupyterhub
     app.kubernetes.io/component: shared-storage
+    recurring-job-group.longhorn.io/{{ longhorn_snapshot_group }}: enabled
 spec:
   accessModes:
     - ReadWriteMany

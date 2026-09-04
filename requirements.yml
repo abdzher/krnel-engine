@@ -12,8 +12,8 @@ roles:
 
 collections:
   - name: community.general
-    version: ">=9.0.0"
+    version: "13.3.0"
   - name: kubernetes.core
-    version: ">=5.0.0"
+    version: "6.5.0"
   - name: ansible.posix
-    version: ">=1.5.0"
+    version: "2.2.2"

@@ -18,6 +18,23 @@
         name: vm
         repo_url: "https://victoriametrics.github.io/helm-charts/"
         state: present
+      register: _helm_repo_vm
+      # kubernetes.core.helm_repository (6.5.0) no es idempotente: falla con
+      # "Repository already have a repository named X" en vez de no-op cuando
+      # el repo ya existe. Se tolera ese mensaje puntual; cualquier otro fallo
+      # sigue siendo fatal.
+      failed_when:
+        - _helm_repo_vm is failed
+        - "'already have a repository' not in (_helm_repo_vm.msg | default(''))"
+
+    - name: Verificar que smtp_auth_password no es el valor de ejemplo (hallazgo E3)
+      ansible.builtin.fail:
+        msg: >
+          'smtp_auth_password' contiene el valor de ejemplo. Genera una
+          contraseña de aplicación en myaccount.google.com/apppasswords (u
+          obtén la credencial de tu relay SMTP) y cífrala:
+          ansible-vault encrypt_string 'clave' --name smtp_auth_password
+      when: smtp_auth_password == "REEMPLAZAR_CON_ANSIBLE_VAULT"
 
     - name: Renderizar vm-values.yaml desde plantilla Jinja2
       ansible.builtin.template:
@@ -43,6 +60,30 @@
         path: "{{ vm_values_tmp }}"
         state: absent
 
+    # -------------------------------------------------------------------------
+    # Alertmanager standalone (hallazgo E3) — ver comentario largo en
+    # vm-values.yaml.j2 y en mrkov-alertmanager.yaml.j2 sobre por qué NO se usa
+    # el Alertmanager integrado del chart (nombre demasiado largo, rompe el
+    # límite de 63 bytes de Kubernetes en el StatefulSet).
+    # -------------------------------------------------------------------------
+    - name: Renderizar VMAlertmanager standalone desde plantilla Jinja2
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../templates/mrkov-alertmanager.yaml.j2"
+        dest: "/tmp/mrkov-alertmanager-{{ ansible_facts['date_time']['epoch'] }}.yaml"
+        mode: "0600"
+      register: alertmanager_tmp
+
+    - name: Aplicar VMAlertmanager standalone
+      kubernetes.core.k8s:
+        kubeconfig: "{{ k8s_kubeconfig }}"
+        state: present
+        src: "{{ alertmanager_tmp.dest }}"
+
+    - name: Limpiar manifest temporal de VMAlertmanager (contiene credenciales)
+      ansible.builtin.file:
+        path: "{{ alertmanager_tmp.dest }}"
+        state: absent
+
     - name: Verificar que el pod de Grafana está corriendo
       kubernetes.core.k8s_info:
         kubeconfig: "{{ k8s_kubeconfig }}"
@@ -63,3 +104,4 @@
         msg: >
           VictoriaMetrics stack '{{ victoria_metrics_release }}' desplegado en
           namespace '{{ victoria_metrics_namespace }}'. Grafana accesible en NodePort {{ victoria_metrics_port }}.
+          Alertmanager activo, notificando a {{ alert_admin_emails | length }} administrador(es) por correo.

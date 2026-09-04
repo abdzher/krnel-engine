@@ -1,0 +1,51 @@
+# ==============================================================================
+# KRNEL — templates/mrkov-alertmanager.yaml.j2
+# VMAlertmanager standalone (hallazgo E3) — agrupa las alertas evaluadas por
+# vmalert y las envía por correo a los administradores.
+#
+# Deliberadamente FUERA del release Helm de victoria-metrics-k8s-stack: el
+# StatefulSet que genera el chart para este componente usa el nombre completo
+# del release+chart como prefijo, y con este release ya supera el límite de
+# 63 bytes que Kubernetes exige para el label `controller-revision-hash`
+# (ver el comentario largo en vm-values.yaml.j2, sección `alertmanager:`).
+# Este CR usa un nombre corto propio para no pisar ese límite, sin tocar
+# ningún recurso ya desplegado por el chart.
+#
+# Renderizado por Ansible — NO editar directamente en el servidor
+# ==============================================================================
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMAlertmanager
+metadata:
+  name: {{ victoria_metrics_alertmanager_name }}
+  namespace: {{ victoria_metrics_namespace }}
+  labels:
+    app.kubernetes.io/part-of: victoria-metrics-k8s-stack
+    app.kubernetes.io/component: alertmanager
+spec:
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: "{{ victoria_metrics_alertmanager_cpu_request }}"
+      memory: "{{ victoria_metrics_alertmanager_memory_request }}"
+    limits:
+      cpu: "{{ victoria_metrics_alertmanager_cpu_limit }}"
+      memory: "{{ victoria_metrics_alertmanager_memory_limit }}"
+  configRawYaml: |
+    global:
+      smtp_smarthost: "{{ smtp_smarthost }}"
+      smtp_from: "{{ smtp_from }}"
+      smtp_auth_username: "{{ smtp_auth_username }}"
+      smtp_auth_password: "{{ smtp_auth_password }}"
+      smtp_require_tls: true
+    route:
+      receiver: admins-mrkov
+      group_by: ['alertname', 'severity']
+      group_wait: 30s
+      group_interval: 5m
+      repeat_interval: 4h
+    receivers:
+      - name: admins-mrkov
+        email_configs:
+{% for admin_email in alert_admin_emails %}
+          - to: '{{ admin_email }}'
+{% endfor %}

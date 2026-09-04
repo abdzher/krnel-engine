@@ -47,7 +47,7 @@
     # -------------------------------------------------------------------------
     - name: Verificar que el archivo allowlist.txt existe en files/
       ansible.builtin.stat:
-        path: "{{ playbook_dir }}/../files/allowlist.txt"
+        path: "{{ allowlist_path }}"
       register: allowlist_stat
       delegate_to: localhost
       tags: [update, update_dry]
@@ -59,6 +59,29 @@
           Copia 'files/allowlist.example.txt' a 'files/allowlist.txt' y
           agrega los correos autorizados (uno por línea).
       when: not allowlist_stat.stat.exists
+      tags: [update, update_dry]
+
+    # -------------------------------------------------------------------------
+    # M4 — Aviso si la cuota de PVCs no alcanza para toda la allowlist.
+    # PVCs fijos: hub-db-dir + 3 compartidos (clases/comunidad/repositorio) = 4.
+    # No falla el despliegue (la cuota real ya está dimensionada, hallazgo
+    # E7/E8) — solo evita que un futuro crecimiento de la allowlist sin ajustar
+    # la cuota se descubra en producción como un PVC en Pending.
+    # -------------------------------------------------------------------------
+    - name: Contar correos en allowlist.txt
+      ansible.builtin.set_fact:
+        allowlist_user_count: "{{ lookup('file', allowlist_path).splitlines() | map('trim') | select() | list | length }}"
+      delegate_to: localhost
+      tags: [update, update_dry]
+
+    - name: Avisar si jupyter_quota_pvcs no alcanza para la allowlist completa
+      ansible.builtin.debug:
+        msg: >
+          jupyter_quota_pvcs ({{ jupyter_quota_pvcs }}) solo deja
+          {{ (jupyter_quota_pvcs | int) - 4 }} carpetas personales, pero
+          allowlist.txt tiene {{ allowlist_user_count }} correos. Si todos
+          piden un perfil con almacenamiento persistente, el cupo no alcanza.
+      when: (jupyter_quota_pvcs | int) - 4 < (allowlist_user_count | int)
       tags: [update, update_dry]
 
     - name: Verificar que proxy_token no es el valor de ejemplo
@@ -109,6 +132,20 @@
     # quede Pending si el PVC fue borrado o quedó fuera del release.
     # -------------------------------------------------------------------------
     - name: Asegurar PVC sqlite del Hub sobre Longhorn
+      # Nota: Ansible NO templatiza claves de diccionario dentro de `definition:`
+      # (solo valores) — una clave dinámica como `recurring-job-group.longhorn.io/{{ var }}`
+      # llega literal al API de Kubernetes. Por eso la etiqueta de snapshot se arma
+      # aparte con `combine()` sobre un dict cuya clave dinámica es un VALOR Jinja2.
+      vars:
+        _hub_db_pvc_labels:
+          app: jupyterhub
+          app.kubernetes.io/component: hub
+          app.kubernetes.io/instance: "{{ jupyterhub_release }}"
+          app.kubernetes.io/managed-by: Helm
+          app.kubernetes.io/name: jupyterhub
+          component: hub
+          heritage: Helm
+          release: "{{ jupyterhub_release }}"
       kubernetes.core.k8s:
         kubeconfig: "{{ k8s_kubeconfig }}"
         state: present
@@ -118,15 +155,7 @@
           metadata:
             name: hub-db-dir
             namespace: "{{ jupyterhub_namespace }}"
-            labels:
-              app: jupyterhub
-              app.kubernetes.io/component: hub
-              app.kubernetes.io/instance: "{{ jupyterhub_release }}"
-              app.kubernetes.io/managed-by: Helm
-              app.kubernetes.io/name: jupyterhub
-              component: hub
-              heritage: Helm
-              release: "{{ jupyterhub_release }}"
+            labels: "{{ _hub_db_pvc_labels | combine({('recurring-job-group.longhorn.io/' ~ longhorn_snapshot_group): 'enabled'}) }}"
             annotations:
               meta.helm.sh/release-name: "{{ jupyterhub_release }}"
               meta.helm.sh/release-namespace: "{{ jupyterhub_namespace }}"
@@ -163,6 +192,21 @@
       tags: [update]
 
     # -------------------------------------------------------------------------
+    # Snapshot recurrente local (hallazgo E1) — barrida de respaldo
+    # Los PVCs estáticos (hub-db-dir, compartidos) ya llevan la etiqueta en su
+    # propia definición. Esta tarea la agrega también a los PVCs personales
+    # que KubeSpawner crea dinámicamente (incluyendo los que ya existían antes
+    # de que esta etiqueta se agregara a `hub-values.yaml.j2`).
+    # -------------------------------------------------------------------------
+    - name: Incluir PVCs existentes en el grupo de snapshots recurrentes de Longhorn
+      ansible.builtin.command: >-
+        kubectl --kubeconfig {{ k8s_kubeconfig }} -n {{ jupyterhub_namespace }}
+        label pvc --all recurring-job-group.longhorn.io/{{ longhorn_snapshot_group }}=enabled --overwrite
+      register: _pvc_snapshot_label
+      changed_when: "'not labeled' not in _pvc_snapshot_label.stdout"
+      tags: [update]
+
+    # -------------------------------------------------------------------------
     # Repositorio Helm de JupyterHub
     # -------------------------------------------------------------------------
     - name: Agregar repositorio Helm de JupyterHub
@@ -171,6 +215,14 @@
         name: jupyterhub
         repo_url: "https://hub.jupyter.org/helm-chart/"
         state: present
+      register: _helm_repo_jupyterhub
+      # kubernetes.core.helm_repository (6.5.0) no es idempotente: falla con
+      # "Repository already have a repository named X" en vez de no-op cuando
+      # el repo ya existe. Se tolera ese mensaje puntual; cualquier otro fallo
+      # sigue siendo fatal.
+      failed_when:
+        - _helm_repo_jupyterhub is failed
+        - "'already have a repository' not in (_helm_repo_jupyterhub.msg | default(''))"
       tags: [update, update_dry]
 
     # -------------------------------------------------------------------------

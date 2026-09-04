@@ -26,8 +26,9 @@
         src: "{{ playbook_dir }}/../../templates/hub-values.yaml.j2"
         dest: "{{ tmp_hub_values.path }}"
         mode: "0600"
-      vars:
-        allowlist_path: "{{ playbook_dir }}/../../files/allowlist.txt"
+      # allowlist_path viene de group_vars/all.yml (hallazgo M2) — ya no se
+      # recalcula aquí; antes usaba una ruta relativa a este playbook, que
+      # vive un nivel más profundo que 05-jupyterhub.yml y podía divergir.
 
     - name: Actualizar Release de JupyterHub en el clúster
       kubernetes.core.helm:
