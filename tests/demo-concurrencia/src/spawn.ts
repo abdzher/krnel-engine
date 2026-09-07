@@ -30,8 +30,11 @@ export async function ensureServerRunning(
     await selectProfile(page, opts.profile, opts.timeoutMs);
   }
 
-  // Esperar a que la URL sea la del server del usuario.
-  await page.waitForURL(/\/user\/[^/]+\//, { timeout: opts.timeoutMs });
+  // Esperar a que la URL sea la del server del usuario — o fallar rápido y
+  // claro si el Hub ya rechazó el spawn (ej. cuota agotada), en vez de
+  // agotar el timeout completo sin decir por qué (Fase 10.5: "confirmar que
+  // el estudiante ve un error claro, no un cuelgue silencioso").
+  await waitForSpawnErrorOrReady(page, opts.timeoutMs);
 
   // El workspace de JupyterLab persiste entre sesiones del mismo usuario:
   // cada corrida deja notebooks abiertos (`Untitled.ipynb`, etc.) y la
@@ -52,6 +55,40 @@ export async function ensureServerRunning(
   // El splash se va cuando Lab termina de cargar.
   await page.locator('.jp-LabShell').first()
     .waitFor({ state: 'visible', timeout: opts.timeoutMs });
+}
+
+/**
+ * Espera a que la URL sea la del server del usuario (`/user/<u>/...`).
+ * Si mientras tanto el Hub rechaza el spawn y re-renderiza `/hub/spawn` (no
+ * `/hub/spawn-pending`, que es el estado normal de "en progreso") con un
+ * mensaje de error visible, lanza de inmediato con ESE mensaje en vez de
+ * esperar el timeout completo — un rechazo síncrono (ej. `ResourceQuota`
+ * agotada) no necesita 5 minutos para confirmarse. Si no hay mensaje visible
+ * pero tampoco se llega a `/user/...`, cae al timeout normal (red de
+ * seguridad: no asume que TODO rechazo va a tener un banner con ese selector).
+ */
+async function waitForSpawnErrorOrReady(page: Page, timeoutMs: number): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (/\/user\/[^/]+\//.test(page.url())) return; // llegó, listo
+
+    const isBackAtSpawnForm =
+      /\/hub\/spawn(\b|\/)/.test(page.url()) && !/\/hub\/spawn-pending/.test(page.url());
+    if (isBackAtSpawnForm) {
+      const errText = await page
+        .locator('.alert-danger, .alert-error, #error, .error')
+        .first()
+        .innerText()
+        .catch(() => null);
+      if (errText && errText.trim()) {
+        throw new Error(`El Hub rechazó el spawn: ${errText.trim()}`);
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
+  }
+  throw new Error(
+    `Spawn no llegó a /user/<usuario>/ en ${timeoutMs}ms (timeout, sin mensaje de error visible en /hub/spawn).`,
+  );
 }
 
 async function selectProfile(page: Page, profile: string | null, timeoutMs: number): Promise<void> {

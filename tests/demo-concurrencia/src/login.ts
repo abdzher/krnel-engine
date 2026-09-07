@@ -86,3 +86,42 @@ export async function submitLogin(
     `Login falló para ${user.username} (credenciales o autorización).`,
   ).toHaveCount(0);
 }
+
+/**
+ * Intenta loguear SIN asumir éxito — para pruebas de aislamiento (Fase 10.4)
+ * que esperan un RECHAZO (ej. usuario fuera de `files/allowlist.txt`). A
+ * diferencia de `submitLogin` (que asume que el login va a funcionar y
+ * lanza si el `waitForURL` se agota, dando un mensaje de timeout confuso
+ * para este caso), acá un timeout corto alcanza: un rechazo de
+ * NativeAuthenticator es casi instantáneo (re-renderiza /hub/login), no hay
+ * ningún spawn de por medio que justifique esperar `LOGIN_TIMEOUT_MS`
+ * completo. Devuelve si la navegación salió de /hub/login — si el login
+ * fue rechazado, `leftLoginPage` debe ser `false`.
+ */
+export async function attemptLoginExpectingRejection(
+  page: Page,
+  username: string,
+  password: string,
+  timeoutMs = 10_000,
+): Promise<{ leftLoginPage: boolean }> {
+  await page.goto('/hub/login', { waitUntil: 'domcontentloaded' });
+
+  const userField = await firstVisible(page, USERNAME_SELECTORS);
+  const passField = await firstVisible(page, PASSWORD_SELECTORS);
+  if (!userField || !passField) {
+    const html = await page.locator('form').first().innerHTML().catch(() => '(sin <form>)');
+    throw new Error(`No pude ubicar los campos de login. HTML del form:\n${html}`);
+  }
+
+  await userField.fill(username);
+  await passField.fill(password);
+
+  const submit = await firstVisible(page, SUBMIT_SELECTORS);
+  await (submit ? submit.click() : passField.press('Enter'));
+
+  const leftLoginPage = await page
+    .waitForURL((url) => !/\/hub\/login/.test(url.pathname), { timeout: timeoutMs })
+    .then(() => true)
+    .catch(() => false);
+  return { leftLoginPage };
+}
