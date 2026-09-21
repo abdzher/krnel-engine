@@ -358,7 +358,7 @@ As an active project, we are currently addressing the following bottlenecks:
 
 ### 📦 Upcoming Releases
 
-* [ ] **v0.1.0:** Stable deployment of JupyterHub, Spark, and Grafana stack on bare-metal K3s (pending resolution of known issues).
+* [x] **v0.1.0:** Stable deployment of JupyterHub, Spark, and Grafana stack on bare-metal K3s (pending resolution of known issues).
 * [ ] **v0.2.0:** Integration of robust user identity components.
 * ...
 * [ ] **v1.0.0:** Full production deployment featuring core capabilities and fault-tolerance resilience.

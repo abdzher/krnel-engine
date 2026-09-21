@@ -1,0 +1,158 @@
+---
+# =============================================================================
+# KRNEL — playbooks/utils/test-tenant-isolation.yml
+# FASE 10.4 del plan de hardening: verificación de REGRESIÓN de aislamiento
+# multi-usuario. A diferencia de diagnose-spark-infra.yml (todo `debug:`,
+# informativo), este playbook usa `assert:` — falla claro y explícito si algo
+# que ya se había cerrado (Fase 7, hallazgo S3) se reabrió sin que nadie lo
+# note, o si la NetworkPolicy de usuario-a-usuario deja de aplicarse.
+#
+# Todo de SOLO LECTURA + un pod de debug efímero (`nicolaka/netshoot`, se
+# borra solo con `--rm`). No modifica RBAC, NetworkPolicy, cuotas ni UFW — si
+# algo de esto falla, hay que REPORTARLO, no ajustar esos recursos desde acá
+# (ver CLAUDE.md).
+#
+# Requisitos:
+#   - Al menos 1 servidor de usuario (demo-NN) corriendo en el namespace —
+#     10.4b (RBAC) no lo necesita, pero 10.4a (NetworkPolicy) sí, para tener
+#     un pod real contra el que probar conectividad.
+#
+# Uso:
+#   ansible-playbook -i inventories/mrkov playbooks/utils/test-tenant-isolation.yml -K
+# =============================================================================
+
+# =============================================================================
+# 10.4a — Aislamiento de red entre pods de usuario (NetworkPolicy)
+# =============================================================================
+# La NetworkPolicy de `singleuser` (hub-values.yaml.j2) solo permite ingreso
+# desde pods con label `spark-role: executor` — nada de usuario-a-usuario. Un
+# pod `netshoot` efímero, soltado a mano en el namespace SIN esa label, es un
+# proxy válido de "cualquier otro pod que no sea un executor autorizado"
+# (un pod de otro usuario tampoco tiene esa label) — coincide con el método
+# que ya proponía el plan ("kubectl run netshoot ... desde dentro del
+# namespace"), no hace falta exec'ear dentro del pod de un usuario real (el
+# entorno de `all-spark-notebook` ni garantiza tener `nc`/`curl` de sobra).
+#
+# k3s usa kube-router como controlador de NetworkPolicy por defecto — o sea
+# que esto SÍ se aplica de verdad en este clúster (confirmado por
+# investigación en la Fase 10), no es una prueba que vaya a dar un falso
+# "pasa" por falta de enforcement.
+- name: "10.4a | Aislamiento de red entre pods de usuario (NetworkPolicy)"
+  hosts: master
+  become: true
+  vars:
+    isolation_probe_pod: netshoot-isolation-test
+  tasks:
+    - name: "Listar servers de usuario Running (jupyter-<usuario>, excluye hub/proxy)"
+      ansible.builtin.shell: |
+        set -o pipefail
+        kubectl get pods -n {{ jupyterhub_namespace }} --no-headers \
+          -o custom-columns=NAME:.metadata.name,IP:.status.podIP,PHASE:.status.phase \
+          | awk '$1 ~ /^jupyter-/ && $1 !~ /^jupyter-(hub|proxy)$/ && $3 == "Running" {print $1, $2}'
+      args:
+        executable: /bin/bash
+      register: user_pods
+      changed_when: false
+      become: false
+
+    - name: "Requiere al menos 1 server de usuario corriendo para probar aislamiento"
+      ansible.builtin.assert:
+        that:
+          - user_pods.stdout_lines | length >= 1
+        fail_msg: >-
+          No hay ningún server de usuario Running en el namespace
+          {{ jupyterhub_namespace }} — levantá una cuenta demo (ej. demo-01)
+          desde el Hub antes de correr este playbook. 10.4a no puede probar
+          nada sin un pod real contra el cual intentar conectar.
+        success_msg: "{{ user_pods.stdout_lines | length }} server(es) de usuario encontrados, sigo con el primero."
+
+    - name: "Elegir el pod objetivo (target) de la prueba"
+      ansible.builtin.set_fact:
+        target_pod_name: "{{ user_pods.stdout_lines[0].split(' ')[0] }}"
+        target_pod_ip: "{{ user_pods.stdout_lines[0].split(' ')[1] }}"
+
+    - name: "Probe: netshoot efímero (namespace jupyter, sin label spark-role=executor) -> puerto 8888 del target"
+      ansible.builtin.shell: |
+        set -o pipefail
+        kubectl run {{ isolation_probe_pod }} -n {{ jupyterhub_namespace }} --rm -i --restart=Never \
+          --image=nicolaka/netshoot --command -- nc -z -w 3 {{ target_pod_ip }} 8888 \
+          && echo "RESULTADO=CONECTADO" || echo "RESULTADO=BLOQUEADO"
+      args:
+        executable: /bin/bash
+      register: isolation_probe
+      changed_when: false
+      failed_when: false
+      become: false
+
+    - name: "Limpieza best-effort del pod de debug (por si --rm no alcanzó a borrarlo)"
+      ansible.builtin.command: kubectl delete pod {{ isolation_probe_pod }} -n {{ jupyterhub_namespace }} --ignore-not-found
+      changed_when: false
+      failed_when: false
+      become: false
+
+    - name: "ASSERT — ningún pod sin label spark-role=executor debe poder llegar al puerto 8888 de otro usuario"
+      ansible.builtin.assert:
+        that:
+          - "'RESULTADO=BLOQUEADO' in isolation_probe.stdout"
+        fail_msg: >-
+          REGRESIÓN DE AISLAMIENTO: un pod netshoot sin label spark-role=executor
+          pudo conectar por red a {{ target_pod_name }} ({{ target_pod_ip }}:8888).
+          La NetworkPolicy de singleuser (hub-values.yaml.j2) debería bloquear ese
+          tráfico. NO ajustes la NetworkPolicy por tu cuenta — reportá este hallazgo.
+          Salida completa: {{ isolation_probe.stdout }}
+        success_msg: "OK: {{ target_pod_name }} no es alcanzable por red desde un pod sin label spark-role=executor."
+
+# =============================================================================
+# 10.4b — RBAC de spark-editor: regresión dura del hallazgo S3 (Fase 7)
+# =============================================================================
+# diagnose-spark-infra.yml (tarea 1.21) ya corre `kubectl auth can-i` para
+# estos verbos pero solo IMPRIME el resultado — nadie se entera si un cambio
+# futuro a spark-rbac.yaml.j2 reabre el permiso. Acá se convierte en
+# `assert:` para que falle explícito. No requiere ningún server de usuario
+# corriendo — solo que 05-jupyterhub.yml ya haya aplicado el RoleBinding.
+- name: "10.4b | RBAC de spark-editor — regresión dura (hallazgo S3, Fase 7)"
+  hosts: master
+  become: true
+  tasks:
+    - name: "Confirmar que el ServiceAccount spark-editor existe"
+      ansible.builtin.command: kubectl get sa spark-editor -n {{ jupyterhub_namespace }}
+      register: spark_sa_check
+      changed_when: false
+      become: false
+
+    - name: "kubectl auth can-i para cada verbo/recurso que la Fase 7 dejó en 'no'"
+      ansible.builtin.command: >-
+        kubectl auth can-i {{ item.verb }} {{ item.resource }}
+        -n {{ jupyterhub_namespace }}
+        --as=system:serviceaccount:{{ jupyterhub_namespace }}:spark-editor
+      loop:
+        - { verb: delete, resource: persistentvolumeclaims }
+        - { verb: patch, resource: persistentvolumeclaims }
+        - { verb: create, resource: persistentvolumeclaims }
+        - { verb: get, resource: secrets }
+        - { verb: list, resource: secrets }
+        - { verb: create, resource: secrets }
+        - { verb: delete, resource: secrets }
+        - { verb: patch, resource: secrets }
+      loop_control:
+        label: "{{ item.verb }} {{ item.resource }}"
+      register: can_i_results
+      # "no" sale con exit code 1 — no es un fallo del playbook en sí, se
+      # convierte en fallo explícito recién en el assert de abajo.
+      changed_when: false
+      failed_when: false
+      become: false
+
+    - name: "ASSERT — ninguno de estos verbos debe estar permitido para spark-editor"
+      ansible.builtin.assert:
+        that:
+          - "'no' in item.stdout"
+        fail_msg: >-
+          REGRESIÓN RBAC (hallazgo S3): spark-editor puede '{{ item.item.verb }}' sobre
+          '{{ item.item.resource }}' (kubectl auth can-i respondió "{{ item.stdout }}").
+          Un cambio a spark-rbac.yaml.j2 reabrió un permiso que la Fase 7 había cerrado.
+          NO ajustes el RBAC por tu cuenta — reportá este hallazgo.
+        success_msg: "OK: spark-editor NO puede '{{ item.item.verb }}' sobre '{{ item.item.resource }}'."
+      loop: "{{ can_i_results.results }}"
+      loop_control:
+        label: "{{ item.item.verb }} {{ item.item.resource }}"
