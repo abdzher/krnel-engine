@@ -17,3 +17,11 @@ files/allowlist.txt
 examples/academic/__pycache__
 examples/comunity/__pycache__
 examples/general/__pycache__
+
+# Suite de demo de concurrencia (Playwright) — deps, credenciales y salidas
+tests/demo-concurrencia/node_modules/
+tests/demo-concurrencia/.env
+tests/demo-concurrencia/playwright-report/
+tests/demo-concurrencia/test-results/
+tests/demo-concurrencia/reports/
+tests/demo-concurrencia/playwright/.auth/

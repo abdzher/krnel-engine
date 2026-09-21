@@ -13,8 +13,8 @@ The automated deployment provisions a full-stack environment, including:
 * **Storage:** **Longhorn** distributed block storage as the default `StorageClass`; legacy NFS playbooks are kept only under `playbooks/old/`.
 * **Orchestration:** Multi-node lightweight Kubernetes (**K3s**) deployment.
 * **Data Processing:** **Apache Spark** integration (utilizing the `all-spark` JupyterHub image).
-* **Observability:** Full monitoring stack with **Grafana** and **Victoria Metrics**.
-* **Ingress & Routing:** K3s/Traefik routing for public services and local-only NodePort access for administrative panels.
+* **Observability:** Full monitoring stack with **Grafana** and **Victoria Metrics**, with CPU/memory `resources` declared per component so monitoring cannot starve student sessions of shared namespace quota. **Alertmanager** notifies administrators by email when `vmalert`'s rules fire — see "Email Alerting" below. Coverage isn't just cluster infrastructure (pod CPU/RAM via kubelet, object state via kube-state-metrics, both already cluster-wide): a `VMServiceScrape` also scrapes JupyterHub's own `/hub/metrics` endpoint, so active users, spawn success/failure and spawn duration are visible too, not just the infrastructure underneath.
+* **Ingress & Routing:** K3s/Traefik routing for public services. Administrative panels (Longhorn UI) have no NodePort or Ingress at all — access is `kubectl port-forward` over an SSH/Tailscale tunnel to the master, never a port exposed on the nodes.
 
 ### 👥 JupyterHub Ecosystem
 
@@ -22,7 +22,7 @@ Within the JupyterHub portal, the platform is pre-configured with:
 
 * **Authentication:** NativeAuthenticator with an allowlist-driven admission flow.
 * **Role-Based Access Control (RBAC):** guests use ephemeral storage; students, professors, and admins use persistent profiles with different resource and shared-folder access policies.
-* **Compute Integration:** Spark on Kubernetes pre-configured to launch executor pods from Jupyter notebooks.
+* **Compute Integration:** Spark on Kubernetes pre-configured to launch executor pods from Jupyter notebooks. The shared `spark-editor` ServiceAccount's Role is scoped to what a Spark driver actually needs, confirmed against a real job: full read/write on `pods` (executors) and `configmaps` (Spark-on-K8s creates one per app at `SparkContext` startup — read-only isn't enough, `SparkSession.getOrCreate()` fails without it); `services` is read-only (`spark.driver.host` is set explicitly to the pod IP, so no driver Service is ever created); and there are no verbs at all on `persistentvolumeclaims` (mounting an existing PVC by `claimName` never requires one), so this ServiceAccount cannot touch another user's PVC.
 * **Shared Storage:** Longhorn-backed shared PVCs for `Clases`, `Comunidad`, and `Repositorio`.
 
 ---
@@ -86,6 +86,12 @@ ansible-galaxy install -r requirements.yml
 ansible-galaxy collection install -r requirements.yml
 
 ```
+
+`requirements.yml` pins **exact** collection versions (not floating minimums) to keep a fresh
+clone reproducible against the same `k8s`/`helm` module behavior this repo was built against. If
+you ever need to bump a collection, install the new version deliberately, run the full test suite
+of playbooks with `--check`/`--syntax-check`, and update the pinned version accordingly — don't
+let it drift back to a `>=` range.
 
 ---
 
@@ -178,26 +184,80 @@ ansible-playbook -i inventories/mrkov playbooks/site.yml --ask-vault-pass --ask-
 
 ## 🔧 Operations & Troubleshooting
 
-### Webhook Validation Errors
+### Email Alerting
 
-If you receive webhook validation errors during the monitoring playbook execution (e.g., *"Admission webhook 'victoria-metrics-operator.default.svc' rejected the request"*), you must remove the orphaned resource before re-running the playbook:
+`vmalert` evaluates alerting rules against the metrics collected by `vmagent`; when one fires,
+Alertmanager groups it and emails the administrators listed in `alert_admin_emails`. Configuration
+lives in `group_vars/all.yml` (see `all.example.yml` for the full list of variables):
+
+* `smtp_smarthost`, `smtp_from`, `smtp_auth_username` — plain values.
+* `smtp_auth_password` — **[VAULT]**. Generate an app password at
+  `myaccount.google.com/apppasswords` (requires 2FA on the sending account) if using Gmail/Google
+  Workspace, then encrypt it: `ansible-vault encrypt_string 'app-password' --name smtp_auth_password`.
+* `alert_admin_emails` — a list, so more than one admin can receive alerts.
+
+Alertmanager runs as a **standalone `VMAlertmanager` resource** (`templates/mrkov-alertmanager.yaml.j2`,
+applied by `04-monitoring.yml`), not through the `victoria-metrics-k8s-stack` chart's own
+`alertmanager:` values — the chart generates a StatefulSet name
+(`vmalertmanager-<release>-<chart-name>`) that, combined with this release's name, exceeds
+Kubernetes' 63-byte label limit and never creates a pod
+([known upstream issue](https://github.com/VictoriaMetrics/helm-charts/issues/34)). The standalone
+resource uses a short name (`victoria_metrics_alertmanager_name`) instead, so it doesn't collide
+with the limit — and doesn't touch `vmsingle`/`vmagent`/`vmalert`/Grafana, which stay on the chart
+exactly as before.
+
+Alertmanager has no persistent storage — losing its pod only loses in-flight silences/notification
+state, never metric history. To confirm alerts are actually wired to a live receiver instead of
+silently going nowhere:
 
 ```bash
-ansible-playbook -i inventories/mrkov playbooks/utils/uninstall-monitoring.yml -K
+kubectl get vmalert -n monitoring -o yaml | grep -A3 notifiers
+kubectl get vmalertmanager -n monitoring
+kubectl get pods -n monitoring | grep alertmanager
+```
+
+**Known leftover-resource bug:** the chart's own (disabled) `VMAlertmanager` — the one that hit the
+63-byte StatefulSet name limit above — can stay behind in the cluster after setting
+`alertmanager.enabled: false`, stuck in a reconcile-error loop (`"actual pod count: 0 less than
+needed: 1"` every ~10s in `mrkov*-victoria-metrics-operator` logs) that fires
+`AlertmanagerErrors`/`ReconcileErrors`/`TooManyLogs` even though the standalone `mrkov-alerts`
+Alertmanager is healthy. This matches a [known operator/chart finalizer
+issue](https://github.com/VictoriaMetrics/helm-charts/issues/1125). `04-monitoring.yml` now runs an
+idempotent cleanup task after every Helm upgrade that deletes that leftover resource by name if
+Helm's own pruning didn't catch it — no manual action should be needed, but if the noise ever
+returns, `kubectl get vmalertmanager -n monitoring` should show only `mrkov-alerts`.
+
+### Webhook Validation Errors
+
+If you receive webhook validation errors during the monitoring playbook execution (e.g., *"Admission webhook 'victoria-metrics-operator.default.svc' rejected the request"*), you must remove the orphaned resource before re-running the playbook. This is **destructive** (it deletes the whole `monitoring` namespace — dashboards, metric history, alerts) so it asks for interactive confirmation unless you pass `confirm_uninstall=true`:
+
+```bash
+ansible-playbook -i inventories/mrkov playbooks/utils/uninstall-monitoring.yml --ask-vault-pass
+# non-interactive:
+ansible-playbook -i inventories/mrkov playbooks/utils/uninstall-monitoring.yml --ask-vault-pass -e confirm_uninstall=true
 
 ```
 
 
 ### Accessing Longhorn Panel
 
-Create SSH tunnel:
+The Longhorn UI has **no NodePort and no Ingress** — `longhorn_nodeport_enabled: false` and
+`longhorn_ingress_enabled: false` by design (hardening finding E5: a Kubernetes NodePort is DNAT'd
+in the `nat`/`PREROUTING` table before UFW's `INPUT` rules ever see it, so a plain `ufw deny` on
+that port does not actually block it). Access is admin-only, through an SSH/Tailscale tunnel to the
+master plus `kubectl port-forward` — no port is ever exposed on the nodes themselves.
+
+Open an SSH tunnel to the master and run `kubectl port-forward` inside it:
 
 ```bash
-ssh -L 30090:localhost:30090 ansible@nd-1
+ssh -L 8080:localhost:8080 ansible@nd-1
+# once inside the SSH session:
+kubectl --kubeconfig ~ansible/.kube/config -n longhorn-system port-forward svc/longhorn-frontend 8080:80
 
 ```
 
-Then open `http://localhost:30090` in your browser.
+Then open `http://localhost:8080` in your browser. Ctrl+C stops the port-forward; closing the SSH
+session tears down the tunnel.
 
 
 ### Accessing Grafana
@@ -229,7 +289,46 @@ ansible-playbook -i inventories/mrkov playbooks/utils/seed-examples.yml --ask-be
 # Diagnose Spark/Kubernetes executor infrastructure
 ansible-playbook -i inventories/mrkov playbooks/utils/diagnose-spark-infra.yml --ask-become-pass --ask-vault-pass
 
+# Mark next boot for a forced fsck (run after an unclean/power-loss shutdown)
+ansible-playbook -i inventories/mrkov playbooks/utils/safe-shutdown.yml --ask-become-pass --tags force-fsck --skip-tags shutdown
+
+# Ordered cluster shutdown (cordon + drain + power off) — NOT part of site.yml, run deliberately
+ansible-playbook -i inventories/mrkov playbooks/utils/safe-shutdown.yml --ask-become-pass
+
 ```
+
+---
+
+### Disaster Recovery
+
+**Local snapshots (not off-site backup):** a Longhorn `RecurringJob` (`jupyter-pvcs-snapshot`) takes
+a daily local snapshot of every PVC in the JupyterHub namespace (personal, shared, and the Hub's
+own database) and keeps the last few. This protects against accidental deletion or a corrupted
+volume — for example from an unclean power-loss shutdown — but **not** against losing a node or a
+disk, since the snapshots live on the same cluster. There is currently no off-site/off-cluster
+backup target configured.
+
+```bash
+# Check the recurring snapshot job and each volume's latest snapshot
+kubectl get recurringjobs.longhorn.io -n longhorn-system
+kubectl get volumes.longhorn.io -n longhorn-system -o custom-columns=NAME:.metadata.name,STATE:.status.state
+
+```
+
+**Recovering from losing `nd-1` (control plane):** the cluster has a single control-plane node, by
+design (see `CLAUDE.md`). If `nd-1` is lost, the platform can be rebuilt on a replacement node by
+re-running the playbooks from scratch (`ansible-playbook playbooks/site.yml --ask-vault-pass
+--ask-become-pass` against the new node). This recovers JupyterHub, Spark, monitoring and Longhorn
+configuration — but **only** if the Longhorn volumes themselves (or their local snapshots above)
+survive the loss of `nd-1`. If `nd-1`'s disk held the only replica of a given volume, that volume's
+data is gone regardless of this runbook — this is why `longhorn_default_replica_count` (2) and the
+recurring snapshots matter.
+
+**Power instability:** if outages are frequent, the durable fix is a UPS with automatic graceful
+shutdown (e.g. via NUT/apcupsd triggering `playbooks/utils/safe-shutdown.yml`) — not yet
+implemented, pending hardware. In the meantime, run the `force-fsck` command above after any
+suspected unclean shutdown, so filesystem corruption is caught and repaired at the next boot
+instead of surfacing later as an unexplained pod crash-loop.
 
 ---
 
@@ -246,8 +345,8 @@ As an active project, we are currently addressing the following bottlenecks:
 ## 🗺️ Roadmap & Future Implementations
 
 * [ ] Custom identity components (custom `krnel` command and JupyterHub template).
-* [ ] Implementation of power outage resilience mechanisms.
-* [ ] Automated cluster backup routines.
+* [ ] Implementation of power outage resilience mechanisms (UPS + automatic graceful shutdown — pending hardware; `playbooks/utils/safe-shutdown.yml` exists for manual/scripted use today).
+* [ ] Automated cluster backup routines (local Longhorn snapshots implemented — see [Disaster Recovery](#disaster-recovery); off-site/off-cluster backup target still pending).
 * [ ] Ansible testing playbooks for pre-flight validation.
 * [ ] Enhanced example notebooks for the user repository.
 * [ ] Migration from SQLite to **PostgreSQL** for JupyterHub state management.
@@ -259,7 +358,7 @@ As an active project, we are currently addressing the following bottlenecks:
 
 ### 📦 Upcoming Releases
 
-* [ ] **v0.1.0:** Stable deployment of JupyterHub, Spark, and Grafana stack on bare-metal K3s (pending resolution of known issues).
+* [x] **v0.1.0:** Stable deployment of JupyterHub, Spark, and Grafana stack on bare-metal K3s (pending resolution of known issues).
 * [ ] **v0.2.0:** Integration of robust user identity components.
 * ...
 * [ ] **v1.0.0:** Full production deployment featuring core capabilities and fault-tolerance resilience.

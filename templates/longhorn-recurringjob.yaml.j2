@@ -1,0 +1,21 @@
+---
+# =============================================================================
+# KRNEL — templates/longhorn-recurringjob.yaml.j2
+# Snapshot recurrente LOCAL para los PVCs del namespace JupyterHub (hallazgo
+# E1 del audit de hardening). No sustituye un backup fuera del clúster — no
+# hay BackupTarget configurado — pero permite revertir un volumen a la última
+# foto sana ante corrupción o borrado accidental, en vez de reparación manual.
+# =============================================================================
+apiVersion: longhorn.io/v1beta2
+kind: RecurringJob
+metadata:
+  name: {{ longhorn_snapshot_group }}-snapshot
+  namespace: {{ longhorn_namespace }}
+spec:
+  cron: "{{ longhorn_snapshot_cron }}"
+  task: "snapshot"
+  groups:
+    - {{ longhorn_snapshot_group }}
+  retain: {{ longhorn_snapshot_retain }}
+  concurrency: {{ longhorn_snapshot_concurrency }}
+  labels: {}

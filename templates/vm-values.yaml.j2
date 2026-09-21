@@ -9,6 +9,13 @@ vmsingle:
   enabled: true
   spec:
     retentionPeriod: "{{ victoria_metrics_retention }}"  # meses de retención
+    resources:
+      requests:
+        cpu: "{{ victoria_metrics_vmsingle_cpu_request }}"
+        memory: "{{ victoria_metrics_vmsingle_memory_request }}"
+      limits:
+        cpu: "{{ victoria_metrics_vmsingle_cpu_limit }}"
+        memory: "{{ victoria_metrics_vmsingle_memory_limit }}"
     storage:
       storageClassName: {{ storage_class_name }}
       accessModes: ["ReadWriteOnce"]
@@ -19,6 +26,13 @@ vmsingle:
 # Grafana — visualización de métricas
 grafana:
   enabled: true
+  resources:
+    requests:
+      cpu: "{{ victoria_metrics_grafana_cpu_request }}"
+      memory: "{{ victoria_metrics_grafana_memory_request }}"
+    limits:
+      cpu: "{{ victoria_metrics_grafana_cpu_limit }}"
+      memory: "{{ victoria_metrics_grafana_memory_limit }}"
   persistence:
     enabled: true
     storageClassName: {{ storage_class_name }}
@@ -41,14 +55,46 @@ grafana:
 # VMAgent — recolector de métricas del clúster
 vmagent:
   enabled: true
+  spec:
+    resources:
+      requests:
+        cpu: "{{ victoria_metrics_vmagent_cpu_request }}"
+        memory: "{{ victoria_metrics_vmagent_memory_request }}"
+      limits:
+        cpu: "{{ victoria_metrics_vmagent_cpu_limit }}"
+        memory: "{{ victoria_metrics_vmagent_memory_limit }}"
 
 # VMAlert — evaluador de reglas de alertas y métricas derivadas
 vmalert:
   enabled: true
   spec:
-    extraArgs:
-      notifier.blackhole: "true"
+    resources:
+      requests:
+        cpu: "{{ victoria_metrics_vmalert_cpu_request }}"
+        memory: "{{ victoria_metrics_vmalert_memory_request }}"
+      limits:
+        cpu: "{{ victoria_metrics_vmalert_cpu_limit }}"
+        memory: "{{ victoria_metrics_vmalert_memory_limit }}"
+    # Hallazgo E3: sacado del blackhole. Apunta al VMAlertmanager standalone
+    # de templates/mrkov-alertmanager.yaml.j2 (ver nota en `alertmanager:`
+    # más abajo sobre por qué no es el Alertmanager del propio chart).
+    notifiers:
+      - url: "http://vmalertmanager-{{ victoria_metrics_alertmanager_name }}.{{ victoria_metrics_namespace }}.svc.cluster.local.:9093"
 
-# AlertManager — desactivado (no requerido en esta fase)
+# AlertManager del chart — deliberadamente DESACTIVADO.
+# El StatefulSet que genera el chart se llama
+# "vmalertmanager-<release>-<nombre-del-chart>" — con este release/chart esa
+# cadena ya tiene 55 caracteres, y Kubernetes le suma el hash de revisión al
+# label `controller-revision-hash` (`<nombre>-<hash>`, sin truncar), pasando
+# los 63 bytes que permite un label — el pod nunca llega a crearse
+# ("must be no more than 63 bytes"). Es un problema conocido y documentado
+# de este chart (github.com/VictoriaMetrics/helm-charts issues #34 y #564)
+# cuando el release+chart superan ~17 caracteres combinados. La solución
+# "correcta" del chart (`nameOverride` corto) renombra TODO el release —
+# arriesga la PVC de métricas de vmsingle y el Secret de la contraseña de
+# Grafana que ya están en producción, para arreglar solo una parte nueva.
+# En su lugar, el Alertmanager real se despliega aparte con un nombre corto
+# propio (`templates/mrkov-alertmanager.yaml.j2`, aplicado desde
+# `04-monitoring.yml`) que no comparte el prefijo largo del release.
 alertmanager:
   enabled: false

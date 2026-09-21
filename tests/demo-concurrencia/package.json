@@ -1,0 +1,36 @@
+{
+  "name": "mrkov-demo-concurrencia",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Suite de demostración en vivo: N usuarios simultáneos en JupyterHub (login -> spawn -> ejecutar celda). No es parte de site.yml ni de ningún pipeline.",
+  "type": "module",
+  "scripts": {
+    "verify": "playwright test --project=verify",
+    "verify:smoke": "playwright test --project=verify smoke.spec.ts",
+    "verify:concurrencia": "playwright test --project=verify concurrencia.spec.ts",
+    "verify:persistence": "playwright test --project=verify persistence.spec.ts",
+    "verify:isolation": "playwright test --project=verify isolation.spec.ts",
+    "verify:resource-governance": "playwright test --project=verify resource-governance.spec.ts",
+    "verify:kernels": "playwright test --project=verify kernels.spec.ts",
+    "demo": "playwright test --project=demo concurrencia.spec.ts",
+    "signup": "node scripts/signup-demo-users.mjs",
+    "check:idle-culler": "node scripts/check-idle-culler.mjs",
+    "report": "playwright show-report",
+    "docker:pull": "docker pull mcr.microsoft.com/playwright:v1.62.1-noble",
+    "docker:verify:smoke": "docker run --rm --ipc=host --user \"$(id -u):$(id -g)\" -e HOME=/tmp -v \"$(pwd):/work\" -w /work mcr.microsoft.com/playwright:v1.62.1-noble npx playwright test --project=verify smoke.spec.ts",
+    "docker:verify:concurrencia": "docker run --rm --ipc=host --user \"$(id -u):$(id -g)\" -e HOME=/tmp -v \"$(pwd):/work\" -w /work mcr.microsoft.com/playwright:v1.62.1-noble npx playwright test --project=verify concurrencia.spec.ts",
+    "docker:verify:persistence": "docker run --rm --ipc=host --user \"$(id -u):$(id -g)\" -e HOME=/tmp -v \"$(pwd):/work\" -w /work mcr.microsoft.com/playwright:v1.62.1-noble npx playwright test --project=verify persistence.spec.ts",
+    "docker:verify:isolation": "docker run --rm --ipc=host --user \"$(id -u):$(id -g)\" -e HOME=/tmp -v \"$(pwd):/work\" -w /work mcr.microsoft.com/playwright:v1.62.1-noble npx playwright test --project=verify isolation.spec.ts",
+    "docker:verify:resource-governance": "docker run --rm --ipc=host --user \"$(id -u):$(id -g)\" -e HOME=/tmp -v \"$(pwd):/work\" -w /work mcr.microsoft.com/playwright:v1.62.1-noble npx playwright test --project=verify resource-governance.spec.ts",
+    "docker:verify:kernels": "docker run --rm --ipc=host --user \"$(id -u):$(id -g)\" -e HOME=/tmp -v \"$(pwd):/work\" -w /work mcr.microsoft.com/playwright:v1.62.1-noble npx playwright test --project=verify kernels.spec.ts"
+  },
+  "dependencies": {
+    "nodemailer": "10.0.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.62.1",
+    "@types/node": "22.15.0",
+    "dotenv": "16.4.7",
+    "typescript": "5.7.3"
+  }
+}

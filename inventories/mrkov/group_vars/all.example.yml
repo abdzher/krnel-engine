@@ -54,10 +54,26 @@ longhorn_data_path:             "/var/lib/longhorn"
 longhorn_default_replica_count: 2
 longhorn_domain:                "longhorn.midominio.com"
 longhorn_ingress_enabled:       false
-longhorn_nodeport_enabled:      true
+longhorn_nodeport_enabled:      false  # deshabilitado (hallazgo E5): el NodePort hace DNAT en la
+                                        # tabla nat/PREROUTING, ANTES de que UFW pueda filtrarlo por
+                                        # INPUT — la regla "route allow to k3s_cluster_cidr" (necesaria
+                                        # para el tráfico normal del clúster) deja pasar ese tráfico
+                                        # ya redirigido sin querer. Acceso admin ahora vía
+                                        # `kubectl port-forward` sobre el túnel SSH/Tailscale ya
+                                        # existente — ver README "Accessing Longhorn Panel".
 longhorn_nodeport:              30090
 longhorn_ui_allowed_cidrs:
   - "{{ network_segment }}"
+
+# Snapshots recurrentes LOCALES (hallazgo E1 del audit). NO son backup: viven
+# en el mismo clúster/discos, así que no protegen contra perder un nodo o un
+# disco — solo contra borrado accidental o corrupción de un volumen puntual
+# (ej. un corte de energía que deja un archivo a medio escribir). Mientras no
+# exista un BackupTarget externo, esta es la única red de seguridad.
+longhorn_snapshot_group:        "jupyter-pvcs"
+longhorn_snapshot_cron:         "0 3 * * *"   # 03:00, fuera de horario de clase
+longhorn_snapshot_retain:       7             # cuántos snapshots guardar por volumen
+longhorn_snapshot_concurrency:  2
 
 # PVCs RWX compartidos para JupyterHub sobre Longhorn.
 jupyter_shared_clases_pvc:      "jupyter-shared-clases"
@@ -80,6 +96,57 @@ victoria_metrics_port:      30030
 victoria_metrics_retention: "1"   # Número de meses
 victoria_metrics_storage:   "5Gi"
 
+# Límites por componente — sin esto, los pods de monitoreo quedan sin acotar
+# y compiten por cuota con las sesiones de estudiantes (hallazgo E4 del audit).
+# Valores conservadores de partida para un stack de un solo clúster pequeño;
+# ajustar si Grafana se siente lento (es el más visible) o si vmalert empieza
+# a evaluar muchas más reglas tras activar alertamiento.
+victoria_metrics_vmsingle_cpu_request:    "250m"
+victoria_metrics_vmsingle_memory_request: "512Mi"
+victoria_metrics_vmsingle_cpu_limit:      "1"
+victoria_metrics_vmsingle_memory_limit:   "2Gi"
+
+victoria_metrics_grafana_cpu_request:    "100m"
+victoria_metrics_grafana_memory_request: "256Mi"
+victoria_metrics_grafana_cpu_limit:      "500m"
+victoria_metrics_grafana_memory_limit:   "512Mi"
+
+victoria_metrics_vmagent_cpu_request:    "100m"
+victoria_metrics_vmagent_memory_request: "256Mi"
+victoria_metrics_vmagent_cpu_limit:      "500m"
+victoria_metrics_vmagent_memory_limit:   "512Mi"
+
+victoria_metrics_vmalert_cpu_request:    "50m"
+victoria_metrics_vmalert_memory_request: "128Mi"
+victoria_metrics_vmalert_cpu_limit:      "250m"
+victoria_metrics_vmalert_memory_limit:   "256Mi"
+
+victoria_metrics_alertmanager_cpu_request:    "50m"
+victoria_metrics_alertmanager_memory_request: "64Mi"
+victoria_metrics_alertmanager_cpu_limit:      "200m"
+victoria_metrics_alertmanager_memory_limit:   "128Mi"
+# Nombre corto a propósito — el chart genera "vmalertmanager-<release>-<chart>"
+# para el Alertmanager integrado y eso ya rompe el límite de 63 bytes de
+# Kubernetes con este release (ver comentario largo en vm-values.yaml.j2).
+# Por eso el Alertmanager real se despliega aparte con este nombre.
+victoria_metrics_alertmanager_name: "mrkov-alerts"
+
+# -----------------------------------------------------------------------------
+# Alertamiento por correo (hallazgo E3) — [VAULT] smtp_auth_password
+# vmalert evalúa las reglas; Alertmanager las agrupa y envía el correo.
+# Generar la contraseña de aplicación en myaccount.google.com/apppasswords
+# (requiere 2FA en la cuenta remitente) y cifrarla:
+#   ansible-vault encrypt_string 'clave-de-16-caracteres' --name smtp_auth_password
+# -----------------------------------------------------------------------------
+smtp_smarthost:      "smtp.gmail.com:587"
+smtp_from:            "alertas@midominio.com"
+smtp_auth_username:   "alertas@midominio.com"
+smtp_auth_password:  "!vault |
+          $ANSIBLE_VAULT...REEMPLAZAR_CON_ANSIBLE_VAULT"
+alert_admin_emails:
+  - "admin1@midominio.com"
+  - "admin2@midominio.com"
+
 # -----------------------------------------------------------------------------
 # JupyterHub
 # -----------------------------------------------------------------------------
@@ -88,6 +155,13 @@ jupyterhub_namespace:  "jupyter"
 jupyterhub_domain:     "jupyter.midominio.com"
 jupyterhub_port:       50080     # puerto donde se expone el JupyterHub a traves de nodeport
 jupyterhub_admin_user: "admin"
+
+# Ruta a la lista blanca de correos autorizados (hallazgo M2). Se calcula UNA
+# sola vez aquí con `inventory_dir` (constante para cualquier playbook, a
+# diferencia de `playbook_dir`, que cambia según la profundidad del playbook
+# que lo invoque — 05-jupyterhub.yml vs. mantenimiento/update-jupyterhub-config.yml
+# estaban en carpetas distintas y cada uno recalculaba esta ruta por su cuenta).
+allowlist_path: "{{ inventory_dir }}/../../files/allowlist.txt"
 
 # -----------------------------------------------------------------------------
 # Portal MRKOV
@@ -117,19 +191,23 @@ spark_executor_memory_overhead: "512m"
 # Limita el consumo total de recursos para prevenir que jobs de Spark
 # con muchos executors saturen el clúster completo.
 #
-# Guía de dimensionamiento (ajustar según hardware real):
-#   Nodos workers: 3 (nd-2, nd-3, nd-4)
-#   Recursos usables por nodo (estimado ~75% del hardware):
-#     cpu_usable_per_node    × 3 workers = quota_cpu_total
-#     memory_usable_per_node × 3 workers = quota_memory_total
-#   Reservar ~20% para pods del sistema (k3s, Longhorn, monitoreo, etc.)
+# Guía de dimensionamiento (hardware real, ver auditoría Fase 3):
+#   4 nodos utilizables (nd-1 también programa cargas, sin node-taint) ×
+#   20 CPU lógicas / 16GB RAM cada uno = 80 vCPU / 64GB totales.
+#   Con ~75% asignable a `jupyter` (el resto para kube-system, longhorn-system,
+#   monitoring, cert-manager, Traefik): ~60 vCPU / ~51GB utilizables.
+#   RAM es el recurso más ajustado: se sube con margen conservador, no al
+#   máximo, y se vigila con el alertamiento de la Fase 4.
+#   `jupyter_quota_pvcs` no está limitado por espacio real: 119 usuarios en el
+#   perfil personal más grande (5Gi c/u) + 170Gi de PVCs compartidos ≈ 766Gi,
+#   muy por debajo de los ~2TB utilizables con replica_count=2 en Longhorn.
 # -----------------------------------------------------------------------------
 jupyter_quota_pods:            "30"    # máx pods simultáneos en namespace
-jupyter_quota_cpu_requests:    "18"    # suma de cpu requests de todos los pods
-jupyter_quota_cpu_limits:      "24"    # suma de cpu limits de todos los pods
-jupyter_quota_memory_requests: "36Gi"  # suma de memory requests
-jupyter_quota_memory_limits:   "48Gi"  # suma de memory limits
-jupyter_quota_pvcs:            "20"    # máx PVCs (home dirs + extras)
+jupyter_quota_cpu_requests:    "40"    # suma de cpu requests de todos los pods
+jupyter_quota_cpu_limits:      "56"    # suma de cpu limits de todos los pods
+jupyter_quota_memory_requests: "40Gi"  # suma de memory requests
+jupyter_quota_memory_limits:   "52Gi"  # suma de memory limits
+jupyter_quota_pvcs:            "130"   # máx PVCs (119 correos + 4 fijos + margen)
 
 # LimitRange — defaults y topes por pod individual (executor o singleuser)
 jupyter_limit_pod_cpu_default_request:    "500m"

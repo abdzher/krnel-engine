@@ -1,0 +1,80 @@
+---
+# =============================================================================
+# KRNEL — playbooks/utils/safe-shutdown.yml
+# Utilidad manual — apagado ordenado del clúster MRKOV, y aviso de fsck
+# forzado en el próximo arranque (hallazgo E9 del audit de hardening).
+#
+# NO forma parte de site.yml ni de ningún tag de site.yml — se invoca
+# aparte y a propósito, antes de un corte de energía planeado (mantenimiento
+# eléctrico) o después de uno accidental, nunca como parte de un despliegue.
+#
+# Uso:
+#   # Apagado ordenado de todo el clúster (cordon + drain + shutdown):
+#   ansible-playbook playbooks/utils/safe-shutdown.yml --ask-become-pass
+#
+#   # Solo forzar fsck en el próximo arranque, sin apagar ahora
+#   # (útil después de un corte de energía, antes del próximo reinicio):
+#   ansible-playbook playbooks/utils/safe-shutdown.yml --ask-become-pass \
+#     --tags force-fsck --skip-tags shutdown
+# =============================================================================
+
+- name: "UTILIDAD | Marcar fsck forzado para el próximo arranque"
+  hosts: k3s_cluster
+  become: true
+  tasks:
+    - name: Crear /forcefsck para que initramfs-tools fuerce fsck en el próximo boot
+      ansible.builtin.file:
+        path: /forcefsck
+        state: touch
+        mode: "0644"
+      tags: [force-fsck]
+
+- name: "UTILIDAD | Apagado ordenado del clúster MRKOV"
+  hosts: master
+  become: false
+  gather_facts: false
+  tags: [shutdown]
+  vars:
+    confirm_shutdown: false
+  tasks:
+    - name: Confirmar apagado del clúster completo
+      ansible.builtin.pause:
+        prompt: >
+          Esto va a hacer 'cordon' + 'drain' de nd-1..nd-4 y apagarlos. Ningún
+          estudiante podrá usar JupyterHub hasta que se enciendan de nuevo a
+          mano. Escribe 'si' para continuar
+      register: confirm_prompt
+      when: not confirm_shutdown
+
+    - name: Abortar si no se confirmó
+      ansible.builtin.fail:
+        msg: "Cancelado por el operador."
+      when:
+        - not confirm_shutdown
+        - confirm_prompt.user_input | default('') | lower != 'si'
+
+    - name: "Cordon | Marcar todos los nodos como no programables"
+      ansible.builtin.command: >-
+        kubectl --kubeconfig {{ k8s_kubeconfig }} cordon {{ item }}
+      loop: "{{ groups['k3s_cluster'] }}"
+      changed_when: true
+
+    - name: "Drain | Evacuar pods de todos los nodos (workers primero)"
+      ansible.builtin.command: >-
+        kubectl --kubeconfig {{ k8s_kubeconfig }} drain {{ item }}
+        --ignore-daemonsets --delete-emptydir-data --timeout=120s
+      loop: "{{ groups['workers'] + groups['master'] }}"
+      changed_when: true
+
+- name: "UTILIDAD | Apagar los nodos"
+  hosts: k3s_cluster
+  become: true
+  gather_facts: false
+  tags: [shutdown]
+  serial: 1
+  order: reverse_inventory   # workers primero, master (nd-1) al final
+  tasks:
+    - name: Apagar el nodo
+      ansible.builtin.command: >-
+        shutdown -h +1 "KRNEL - apagado ordenado por safe-shutdown.yml"
+      changed_when: true
