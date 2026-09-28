@@ -1,0 +1,30 @@
+cff-version: 1.2.0
+title: "KRNEL Engine: Academic PaaS for Distributed Research"
+message: "Si usas este software, por favor cítalo como se indica a continuación."
+type: software
+authors:
+  - given-names: Abdiel Zahir
+    family-names: Hernandez Escobedo
+    affiliation: Universidad Autónoma Chapingo
+  - given-names: Alejandro
+    family-names: Corona Ambriz
+    affiliation: Universidad Autónoma Chapingo
+    orcid: "https://orcid.org/0000-0003-0005-7480"
+abstract: >-
+  KRNEL Engine es un marco de Infraestructura como Código basado en Ansible
+  para desplegar y administrar un clúster K3s en servidores físicos, con
+  JupyterHub y Apache Spark implementados, orientado a la docencia y 
+  la investigación.
+keywords:
+  - Ansible
+  - Kubernetes
+  - K3s
+  - JupyterHub
+  - Apache Spark
+  - Infrastructure as Code
+  - Longhorn
+version: 0.1.0
+date-released: 2026-09-28
+license: Apache-2.0
+repository-code: "https://github.com/abdzher/krnel-engine"
+url: "https://abdzher.github.io/krnel-mrkov-site/"
